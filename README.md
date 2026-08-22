@@ -20,6 +20,10 @@
 
 ## 部署
 
+本仓库推荐用 Docker Compose 跑 API。镜像编译和运行都是 Debian（`rust:1.97-bookworm` / `debian:bookworm-slim`）。GitHub Actions 在 PR 上只构建镜像、不上传；合并进 `main` 后把镜像上传到 GitHub Container Registry（`ghcr.io`，不是 Docker Hub），再 SSH 到运行环境（本项目实例是阿里云 ECS）拉取并重启容器。
+
+网页不在本镜像里，见 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)。
+
 ### Docker Compose（推荐）
 
 克隆仓库并准备配置：
@@ -64,6 +68,43 @@ docker compose logs -f disaster-alert
 
 可选应用配置见[配置](#配置)。
 
+生产环境也可以不在主机上构建，改为拉取 CI 推送的镜像：
+
+```bash
+export DISASTER_ALERT_IMAGE=ghcr.io/luyi2008/disaster-alert:latest
+docker compose pull
+docker compose up -d --no-build
+```
+
+未设置 `DISASTER_ALERT_IMAGE` 时，Compose 默认使用上述 `latest` 标签；本地开发仍可用 `docker compose up -d --build` 从当前源码构建。
+
+### 合并到 main 后的自动部署
+
+`main` 上的 [container workflow](.github/workflows/container.yml) 会：
+
+1. 构建镜像并上传到 `ghcr.io/<owner>/<repo>:latest`（同时打提交 SHA 标签；不是 Docker Hub）
+2. 把当前提交的 `compose.yaml` 拷到主机上的部署目录
+3. 把 GitHub Secret `DEPLOY_ENV_FILE` 写成该目录下的 `.env`（覆盖已有文件）
+4. 用本次 job 的 `GITHUB_TOKEN` 登录 `ghcr.io`、拉取镜像，并以 `--no-build` 重启容器
+
+`DEPLOY_ENV_FILE` 不是仓库里的文件。它是一个 Actions Secret 的**名字**；**值**是生产环境整份 `.env` 文本（与 [.env.example](.env.example) 同结构，填真实配置）。Compose 仍通过 `env_file: .env` 读主机上的文件；应用进程看不到这个 Secret 名。
+
+需要在本仓库 Settings → Secrets and variables → Actions 配置：
+
+| Secret | 用途 |
+| --- | --- |
+| `DEPLOY_HOST` | ECS 公网 IP 或 SSH 主机名 |
+| `DEPLOY_USER` | SSH 用户 |
+| `DEPLOY_SSH_KEY` | 该用户的私钥（仅用于部署） |
+| `DEPLOY_PATH` | 主机上放置 `compose.yaml` 与 `.env` 的目录，例如 `/opt/disaster-alert` |
+| `DEPLOY_ENV_FILE` | 整份生产 `.env` 文本。第一次把 ECS 上现有 `.env` 贴进去，避免首次部署写成空文件 |
+
+日常改业务配置：在 GitHub 里编辑 `DEPLOY_ENV_FILE`，然后手动运行该 workflow（`workflow_dispatch`）或等下次合进 `main`。每次部署都会覆盖主机上的 `.env`，不要在 ECS 上改完还指望能留下。私钥不进 git、不进镜像。
+
+首次在 ECS 上准备一次即可：安装 Docker 与 Compose 插件、把部署公钥写入 `authorized_keys`、创建可写的 `DEPLOY_PATH`。安全组放行 SSH（建议限制来源），应用端口继续只绑 `127.0.0.1`，对外 HTTPS 由主机上的反向代理处理（配置不在本仓库）。数据库在 Docker 命名卷里，换镜像不会删除。
+
+PR 不会部署、也不会写 `.env`。未配置上述 secrets 时，合并后的 deploy job 会失败；镜像若已上传仍会留在 `ghcr.io`。
+
 ### 手动部署
 
 不使用 Docker 时，需要 Rust `1.97` 或更高版本。先准备配置：
@@ -85,9 +126,18 @@ cargo build --release
 
 ### 更新 Docker Compose 部署
 
+本项目实例在 `main` 更新后由 Actions 自动拉取镜像。其他自建环境可以：
+
 ```bash
 git pull --ff-only
 docker compose up -d --build
+```
+
+或只更新镜像、不在主机编译：
+
+```bash
+docker compose pull
+docker compose up -d --no-build
 ```
 
 数据库保存在 Docker 命名卷中。`docker compose down` 不会删除数据库；`docker compose down -v` 会永久删除数据库。

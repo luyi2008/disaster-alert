@@ -1,4 +1,4 @@
-name: Build container image
+name: Build and deploy
 
 on:
   push:
@@ -9,15 +9,15 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: container-${{ github.ref }}
-  cancel-in-progress: true
+  packages: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: container-build-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -25,10 +25,74 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
+      - name: Log in to GitHub Container Registry
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: container-deploy-main
+      cancel-in-progress: false
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Materialize env file
+        env:
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+        run: |
+          if [ -z "$DEPLOY_ENV_FILE" ]; then
+            echo "DEPLOY_ENV_FILE is not set or empty" >&2
+            exit 1
+          fi
+          umask 077
+          printenv DEPLOY_ENV_FILE > .env
+
+      - name: Copy Compose file and env to host
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: compose.yaml,.env
+          target: ${{ secrets.DEPLOY_PATH }}
+          overwrite: true
+
+      - name: Deploy container
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ghcr.io/${{ github.repository }}:latest
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: GHCR_TOKEN,IMAGE
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            chmod 600 .env
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
+            docker pull "$IMAGE"
+            DISASTER_ALERT_IMAGE="$IMAGE" docker compose up -d --no-build --remove-orphans
+            docker image prune --force
+            docker logout ghcr.io
