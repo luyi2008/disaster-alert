@@ -1,6 +1,6 @@
 # 灾害预警 Bark 订阅系统
 
-通过 Bark 接收地震、气象、海啸和台风信息。服务提供 HTTP JSON API。网页订阅界面在独立仓库 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web)，可单独部署。
+通过 Bark 接收地震、气象、海啸和台风信息。服务提供 HTTP JSON API。网页订阅界面在独立仓库 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)，可单独部署。
 
 示例：<https://alert.noctiro.moe>
 
@@ -16,7 +16,7 @@
 - 通知可打开详情页查看灾害信息和本次命中的订阅条件
 - 服务重启后会继续处理尚未完成的订阅确认和通知
 
-本仓库的二进制只提供 JSON API 与后台任务。启动服务用 `cargo run`（清单里只有 `disaster-alert`）。进程和 Docker 镜像都不会再返回网页；订阅页和通知详情页见 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web)。若 Bark 详情仍使用原来的站点根地址，由站点反代将 `/` 与 `/incidents` 指到前端服务、将 `/api` 与 `/health` 指到本服务。
+本仓库的二进制只提供 JSON API 与后台任务。启动服务用 `cargo run`（清单里只有 `disaster-alert`）。进程和 Docker 镜像都不会再返回网页；订阅页和通知详情页见 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)。若 Bark 详情仍使用原来的站点根地址，由站点反代将 `/` 与 `/incidents` 指到前端服务、将 `/api` 与 `/health` 指到本服务。
 
 地震波到达时间由起震时间、距离、深度和配置的波速估算。震级不改变传播时间，但会影响监测点的预计烈度；预计烈度未命中订阅规则时不会发送通知。
 
@@ -169,7 +169,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 
 ## API
 
-机器可读的接口规范见 [OpenAPI 3.1](docs/openapi.yaml)。网页由 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web) 提供，不包含在本二进制中。
+机器可读的接口规范见 [OpenAPI 3.1](docs/openapi.yaml)。网页由 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web) 提供，不包含在本二进制中。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -192,7 +192,7 @@ cargo run
 
 默认监听 `http://127.0.0.1:30010` 上的 JSON API，没有网页。
 
-本地看订阅界面时，再在 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web) 里执行 `npm run dev`，浏览器打开 Vite 地址。前端开发约定见该仓库 README。
+本地看订阅界面时，再在 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web) 里执行 `npm run dev`，浏览器打开 Vite 地址。前端开发约定见该仓库 README。
 
 提交前：
 
