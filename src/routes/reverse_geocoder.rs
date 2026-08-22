@@ -91,7 +91,7 @@ impl ReverseGeocoder {
         let endpoint =
             Url::parse(reverse_geocoding_url).context("failed to parse reverse geocoding URL")?;
         let client = reqwest::Client::builder()
-            .user_agent("disaster-alert/1.0 (https://github.com/noctiro/disaster-alert)")
+            .user_agent("disaster-alert/1.0 (https://github.com/luyi2008/disaster-alert)")
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())

@@ -2,8 +2,6 @@
 
 通过 Bark 接收地震、气象、海啸和台风信息。服务提供 HTTP JSON API。网页订阅界面在独立仓库 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)，可单独部署。
 
-示例：<https://alert.noctiro.moe>
-
 ## 功能
 
 - 接收 Wolfx、FAN Studio 和 Huania 提供的灾害信息
@@ -27,7 +25,7 @@
 克隆仓库并准备配置：
 
 ```bash
-git clone https://github.com/noctiro/disaster-alert.git
+git clone https://github.com/luyi2008/disaster-alert.git
 cd disaster-alert
 cp .env.example .env
 ```
