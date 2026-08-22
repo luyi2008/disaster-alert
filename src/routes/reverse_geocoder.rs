@@ -79,6 +79,11 @@ impl ReverseGeocoder {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn disabled() -> Self {
+        Self { enabled: None }
+    }
+
     fn from_settings(enabled: bool, reverse_geocoding_url: &str) -> Result<Self> {
         if !enabled {
             return Ok(Self { enabled: None });

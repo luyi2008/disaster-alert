@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
 publish = false
+default-run = "disaster-alert"
 
 [features]
 default = []
 benchmarks = []
-migration = ["dep:sled"]
 
 [lib]
 name = "disaster_alert"
@@ -17,11 +17,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "disaster-alert"
 path = "src/main.rs"
-
-[[bin]]
-name = "disaster-alert-migrate"
-path = "src/bin/disaster_alert_migrate.rs"
-required-features = ["migration"]
 
 [dependencies]
 anyhow = { version = "1.0.103", default-features = false, features = ["std"] }
@@ -39,7 +34,6 @@ roaring = { version = "0.11.4", default-features = false, features = ["std"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
 sha2 = { version = "0.11.0", default-features = false }
-sled = { version = "0.34.7", default-features = false, features = ["no_metrics"], optional = true }
 tokio = { version = "1.52.3", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 tower-http = { version = "0.6.11", default-features = false, features = ["cors", "compression-gzip"] }
@@ -51,9 +45,6 @@ zeroize = { version = "1.9.0", default-features = false, features = ["alloc"] }
 [dev-dependencies]
 criterion = { version = "0.7.0", default-features = false, features = ["cargo_bench_support"] }
 tempfile = { version = "3.23.0", default-features = false }
-
-[build-dependencies]
-html-minifier = "5.0.2"
 
 [[bench]]
 name = "event_pipeline"

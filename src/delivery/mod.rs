@@ -4,15 +4,13 @@ mod message;
 
 pub(crate) use bark::{AlertRecipient, BarkDeliveryError, BarkPermit, CountdownRecipient};
 pub(crate) use bark::{BarkNotifier, BarkPushConfig};
+#[cfg(test)]
+pub(crate) use context::NotificationIntensityBandSnapshot;
 pub(crate) use context::NotificationLinkService;
 pub(crate) use context::{NotificationContextInput, NotificationVerifyError};
-#[cfg(test)]
 pub(crate) use context::{
-    NotificationEventSnapshot, NotificationIntensityBandSnapshot, NotificationTargetSnapshot,
-    NotificationTimingSnapshot,
-};
-pub(crate) use context::{
-    NotificationRuleSnapshot, NotificationSnapshot, NotificationSourcesSnapshot,
+    NotificationEventSnapshot, NotificationRuleSnapshot, NotificationSnapshot,
+    NotificationSourcesSnapshot,
 };
 pub(crate) use message::{AlertTiming, remaining_seconds};
 

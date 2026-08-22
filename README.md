@@ -1,6 +1,6 @@
 # 灾害预警 Bark 订阅系统
 
-通过 Bark 接收地震、气象、海啸和台风信息。服务提供网页订阅界面，也可以直接调用 HTTP API。
+通过 Bark 接收地震、气象、海啸和台风信息。服务提供 HTTP JSON API。网页订阅界面在独立仓库 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web)，可单独部署。
 
 示例：<https://alert.noctiro.moe>
 
@@ -15,6 +15,8 @@
 - 不同灾种使用独立的 Bark 标题和正文排版，不显示内部渠道、事件 ID 等开发字段
 - 通知可打开详情页查看灾害信息和本次命中的订阅条件
 - 服务重启后会继续处理尚未完成的订阅确认和通知
+
+本仓库的二进制只提供 JSON API 与后台任务。启动服务用 `cargo run`（清单里只有 `disaster-alert`）。进程和 Docker 镜像都不会再返回网页；订阅页和通知详情页见 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web)。若 Bark 详情仍使用原来的站点根地址，由站点反代将 `/` 与 `/incidents` 指到前端服务、将 `/api` 与 `/health` 指到本服务。
 
 地震波到达时间由起震时间、距离、深度和配置的波速估算。震级不改变传播时间，但会影响监测点的预计烈度；预计烈度未命中订阅规则时不会发送通知。
 
@@ -81,7 +83,7 @@ cargo build --release
 
 生产环境建议监听 `127.0.0.1`，再通过反向代理提供 HTTPS。
 
-## 维护与迁移
+## 维护
 
 ### 更新 Docker Compose 部署
 
@@ -93,24 +95,6 @@ docker compose up -d --build
 数据库保存在 Docker 命名卷中。`docker compose down` 不会删除数据库；`docker compose down -v` 会永久删除数据库。
 
 数据库目录只能由一个应用实例使用，不要增加 `disaster-alert` 服务的副本数。Compose 会等待服务优雅退出并完成数据库刷盘。
-
-### 迁移旧版 sled 数据
-
-以下步骤适用于手动部署。只迁移旧版订阅时，先编译迁移工具：
-
-```bash
-cargo build --release --features migration --bin disaster-alert-migrate
-```
-
-停止旧服务后执行：
-
-```bash
-./target/release/disaster-alert-migrate \
-  ./data/disaster-alert.db/ \
-  ./data/disaster-alert.fjall
-```
-
-迁移完成后，将 `DB_PATH` 指向新目录。迁移工具只迁移订阅，不迁移旧通知任务和历史记录。迁移期间不要同时运行新旧服务。
 
 ## 配置
 
@@ -185,6 +169,8 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 
 ## API
 
+机器可读的接口规范见 [OpenAPI 3.1](docs/openapi.yaml)。网页由 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web) 提供，不包含在本二进制中。
+
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `POST` | `/api/subscribe` | 创建或覆盖订阅 |
@@ -192,12 +178,23 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `GET` | `/api/bark-urls` | 获取可用的 Bark 服务地址 |
 | `GET` | `/api/subscription-options` | 获取灾种、来源和默认规则 |
 | `GET` | `/api/reverse-geocode` | 根据坐标查询行政区 |
-| `GET` | `/api/status` | 获取订阅总数、数据源和后台任务状态 |
+| `GET` | `/api/incidents/{incident_id}/notifications/{token}` | 获取通知详情（需通知链接中的 token） |
+| `GET` | `/api/status` | 获取订阅总数、数据源、后台任务状态，以及实例是否已确认责任声明 |
 | `GET` | `/health` | 健康检查 |
 
-机器可读的接口规范见 [OpenAPI 3.1](docs/openapi.yaml)。大多数用户可以直接使用内置的网页。
-
 ## 开发
+
+本仓启动 API（需先 `cp .env.example .env` 并填写必填项）：
+
+```bash
+cargo run
+```
+
+默认监听 `http://127.0.0.1:30010` 上的 JSON API，没有网页。
+
+本地看订阅界面时，再在 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web) 里执行 `npm run dev`，浏览器打开 Vite 地址。前端开发约定见该仓库 README。
+
+提交前：
 
 ```bash
 cargo fmt --check

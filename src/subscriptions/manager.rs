@@ -83,12 +83,7 @@ impl SubscriptionManager {
         Ok(())
     }
 
-    #[cfg(feature = "migration")]
-    pub(crate) fn import_subscriptions(&self, subscriptions: Vec<Subscription>) -> Result<usize> {
-        self.storage.import_subscription_batch(subscriptions)
-    }
-
-    #[cfg(any(test, feature = "migration"))]
+    #[cfg(test)]
     pub(crate) fn get_subscription(
         &self,
         destination: &DestinationId,

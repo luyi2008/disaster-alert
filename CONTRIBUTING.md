@@ -4,20 +4,31 @@
 
 ## 改动边界
 
-- `src/` 包含完整 Rust 应用：订阅 API、WebSocket 监听、订阅匹配、Bark 推送和 Web 页面路由
-- `web/index.html` 是唯一 Web 界面源文件，由 `build.rs` 压缩后通过 `include_str!` 编译进二进制
+- `src/` 包含完整 Rust 应用：订阅 API、WebSocket 监听、订阅匹配和 Bark 推送。本仓不嵌入网页。
+- 网页在独立仓库 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web)，由该仓自行构建和部署。
 - 仓库不维护特定平台的反向代理、进程守护或静态托管配置
 
 服务端行为和 Web 交互尽量分开改，跨层改动需要说明数据流如何变化
 
 ## 本地检查
 
-开发入口：
+本仓只跑 API，入口是 `disaster-alert`：
 
 ```bash
 cp .env.example .env
+# 在 .env 中填写 ALERT_DETAIL_BASE_URL、ALERT_SIGNING_KEY 等
 cargo run
 ```
+
+要打开订阅页或通知详情页，另开终端克隆并启动 [disaster-alert-web](https://github.com/noctiro/disaster-alert-web)：
+
+```bash
+cd ../disaster-alert-web
+npm install
+npm run dev
+```
+
+Vite 会把 `/api` 和 `/health` 代理到本机 API。浏览器打开 Vite 提示的本地地址，不要只开 `http://127.0.0.1:30010/` 当网页。
 
 提交前至少跑：
 

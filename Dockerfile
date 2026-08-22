@@ -3,10 +3,9 @@
 FROM rust:1.97-bookworm AS builder
 
 WORKDIR /build
-COPY Cargo.toml Cargo.lock build.rs ./
+COPY Cargo.toml Cargo.lock ./
 COPY benches ./benches
 COPY src ./src
-COPY web ./web
 
 RUN cargo build --locked --release --bin disaster-alert
 

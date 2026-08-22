@@ -509,6 +509,7 @@ pub(crate) struct BarkUrlsResponse {
 
 #[derive(Serialize)]
 struct StatusResponse {
+    instance_terms_accepted: bool,
     total_subscriptions: usize,
     #[serde(flatten)]
     runtime: RuntimeStatusSnapshot,
@@ -562,6 +563,7 @@ pub(crate) async fn status_handler(State(state): State<AppState>) -> impl IntoRe
             Json(ApiResponse::success(
                 "运行状态获取成功",
                 Some(StatusResponse {
+                    instance_terms_accepted: state.instance_terms_accepted,
                     total_subscriptions,
                     runtime: state.runtime_status.snapshot(durable),
                 }),
@@ -663,11 +665,13 @@ mod tests {
     #[test]
     fn status_response_flattens_subscription_count_and_runtime_metrics() {
         let response = StatusResponse {
+            instance_terms_accepted: true,
             total_subscriptions: 12,
             runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default()),
         };
         let value = serde_json::to_value(response).expect("status response should serialize");
 
+        assert_eq!(value["instance_terms_accepted"], true);
         assert_eq!(value["total_subscriptions"], 12);
         assert!(value.get("wolfx").is_some());
         assert!(value.get("fanstudio").is_some());
