@@ -2,6 +2,7 @@ name: disaster-alert
 
 services:
   disaster-alert:
+    image: ${DISASTER_ALERT_IMAGE:-ghcr.io/luyi2008/disaster-alert:latest}
     build:
       context: .
     restart: unless-stopped

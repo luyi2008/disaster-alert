@@ -6,7 +6,7 @@
 
 - `src/` 包含完整 Rust 应用：订阅 API、WebSocket 监听、订阅匹配和 Bark 推送。本仓不嵌入网页。
 - 网页在独立仓库 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)，由该仓自行构建和部署。
-- 仓库不维护特定平台的反向代理、进程守护或静态托管配置
+- 仓库不维护特定平台的反向代理、进程守护或静态托管配置。合并进 `main` 后的容器发布由 GitHub Actions 完成（构建镜像、上传到 `ghcr.io`、SSH 到已有 Docker 主机，并用 Secret `DEPLOY_ENV_FILE` 写出 `.env`）；ECS 上的 nginx/Caddy 与安全组仍由运维自行管理。
 
 服务端行为和 Web 交互尽量分开改，跨层改动需要说明数据流如何变化
 
