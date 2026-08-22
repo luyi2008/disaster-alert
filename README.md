@@ -101,7 +101,7 @@ docker compose up -d --no-build
 
 日常改业务配置：在 GitHub 里编辑 `DEPLOY_ENV_FILE`，然后手动运行该 workflow（`workflow_dispatch`）或等下次合进 `main`。每次部署都会覆盖主机上的 `.env`，不要在 ECS 上改完还指望能留下。私钥不进 git、不进镜像。
 
-首次在 ECS 上准备一次即可：安装 Docker 与 Compose 插件、把部署公钥写入 `authorized_keys`、创建可写的 `DEPLOY_PATH`。安全组放行 SSH（建议限制来源），应用端口继续只绑 `127.0.0.1`，对外 HTTPS 由主机上的反向代理处理（配置不在本仓库）。数据库在 Docker 命名卷里，换镜像不会删除。
+首次在 ECS 上准备一次即可：安装 Docker 与 Compose 插件、把部署公钥写入 `authorized_keys`、创建可写的 `DEPLOY_PATH`。安全组放行 SSH（建议限制来源）以及应用端口（默认 `30010`）。Compose 默认把端口发到 `0.0.0.0`，没有 nginx 时也可直连；若前面有反代，可把 `SERVER_PUBLISH_HOST` 设为 `127.0.0.1`。数据库在 Docker 命名卷里，换镜像不会删除。
 
 PR 不会部署、也不会写 `.env`。未配置上述 secrets 时，合并后的 deploy job 会失败；镜像若已上传仍会留在 `ghcr.io`。
 
@@ -155,7 +155,7 @@ docker compose up -d --no-build
 | `INSTANCE_TERMS_ACCEPTED` | `false` | 为 `false` 时拒绝新增和覆盖订阅，已有任务与取消订阅不受影响。设为 `true` 前须阅读“使用与部署责任” |
 | `SERVER_HOST` | `0.0.0.0` | 监听地址 |
 | `SERVER_PORT` | `30010` | 服务端口 |
-| `SERVER_PUBLISH_HOST` | `127.0.0.1` | Docker Compose 发布端口时使用的宿主机地址；不使用 Compose 时忽略 |
+| `SERVER_PUBLISH_HOST` | `0.0.0.0` | Docker Compose 发布端口时使用的宿主机地址；不使用 Compose 时忽略 |
 | `ALLOWED_ORIGINS` | 空 | 允许访问 API 的前端 Origin，多个值用逗号分隔 |
 | `DB_PATH` | `./data/disaster-alert.fjall` | 数据库目录；同一目录只能由一个应用实例使用 |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `15` | 服务关闭时的最长等待时间，范围 `1..=300` 秒 |
