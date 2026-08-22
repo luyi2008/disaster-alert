@@ -65,7 +65,7 @@ jobs:
             exit 1
           fi
           umask 077
-          printenv DEPLOY_ENV_FILE > .env
+          printf '%s\n' "$DEPLOY_ENV_FILE" > .env
 
       - name: Copy Compose file and env to host
         uses: appleboy/scp-action@v1.0.0
