@@ -15,7 +15,7 @@ services:
     ports:
       - target: ${SERVER_PORT:-30010}
         published: ${SERVER_PORT:-30010}
-        host_ip: ${SERVER_PUBLISH_HOST:-127.0.0.1}
+        host_ip: ${SERVER_PUBLISH_HOST:-0.0.0.0}
         protocol: tcp
     volumes:
       - disaster-alert-data:/data
