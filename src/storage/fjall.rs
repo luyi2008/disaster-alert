@@ -175,56 +175,6 @@ impl FjallStorage {
             .map_err(|error| anyhow::anyhow!("Fjall matching lock poisoned: {error}"))
     }
 
-    #[cfg(feature = "migration")]
-    pub(crate) fn bind_migration_source(
-        &self,
-        source_fingerprint: [u8; 32],
-        existing_partial: bool,
-    ) -> Result<()> {
-        let key = b"migration:source";
-        let existing = self.meta.get(key)?;
-        if let Some(existing) = existing {
-            anyhow::ensure!(
-                existing.as_ref() == source_fingerprint,
-                "Fjall target is bound to a different source"
-            );
-        } else {
-            anyhow::ensure!(
-                self.active_subscription_count()? == 0,
-                if existing_partial {
-                    "unbound partial Fjall target contains subscriptions"
-                } else {
-                    "migration target contains subscriptions"
-                }
-            );
-            anyhow::ensure!(
-                self.pending_inbox(1)?.is_empty()
-                    && self.pending_match_jobs(1)?.is_empty()
-                    && self.pending_delivery_batches(1)?.is_empty(),
-                "migration target contains runtime work"
-            );
-            self.meta.insert(key, source_fingerprint)?;
-        }
-        Ok(())
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn verify_migration_source(&self, source_fingerprint: [u8; 32]) -> Result<()> {
-        anyhow::ensure!(
-            self.meta
-                .get(b"migration:source")?
-                .is_some_and(|value| value.as_ref() == source_fingerprint),
-            "Fjall target is not bound to this source"
-        );
-        anyhow::ensure!(
-            self.pending_inbox(1)?.is_empty()
-                && self.pending_match_jobs(1)?.is_empty()
-                && self.pending_delivery_batches(1)?.is_empty(),
-            "migration target contains runtime work"
-        );
-        Ok(())
-    }
-
     pub(crate) fn next_id(&self, name: &str) -> Result<u64> {
         let _lock = self
             .id_lock
@@ -780,7 +730,7 @@ impl FjallStorage {
         Ok(count)
     }
 
-    #[cfg(any(feature = "migration", feature = "benchmarks"))]
+    #[cfg(feature = "benchmarks")]
     pub(crate) fn import_subscription_batch(
         &self,
         subscriptions: Vec<Subscription>,
@@ -874,91 +824,6 @@ impl FjallStorage {
             .commit()
             .context("failed to commit migrated subscription batch")?;
         Ok(count)
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn active_subscriptions(&self) -> Result<Vec<StoredSubscription>> {
-        let mut records = Vec::new();
-        for item in self.subscriptions.iter() {
-            let record: StoredSubscription = decode(&item.value()?)?;
-            if record.active {
-                records.push(record);
-            }
-        }
-        Ok(records)
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn verify_posting_consistency(&self) -> Result<()> {
-        let mut expected = std::collections::BTreeMap::<[u8; 20], RoaringBitmap>::new();
-        for record in self.active_subscriptions()? {
-            let compiled = self
-                .compiled_subscription(record.id)?
-                .context("active subscription is missing its compiled record")?;
-            anyhow::ensure!(
-                compiled.subscription_id == record.id
-                    && compiled.destination_id == record.destination_id
-                    && compiled.generation == record.generation,
-                "compiled subscription identity mismatch"
-            );
-            for key in MatchPostingKey::for_subscription(&compiled) {
-                expected
-                    .entry(key.encode())
-                    .or_default()
-                    .insert(compiled.subscription_id.posting_offset());
-            }
-        }
-        let mut actual = std::collections::BTreeMap::new();
-        for item in self.postings.iter() {
-            let (key, value) = item.into_inner()?;
-            let key: [u8; 20] = key
-                .as_ref()
-                .try_into()
-                .context("posting key has an invalid length")?;
-            actual.insert(key, decode_bitmap(&value)?);
-        }
-        anyhow::ensure!(
-            actual == expected,
-            "posting index is not bidirectionally consistent"
-        );
-        Ok(())
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn verify_sample_matches(&self, source: &[Subscription]) -> Result<()> {
-        let matcher = crate::matching::MatchEngine::new(1)?;
-        for event in crate::matching::sample_events(source, 256) {
-            let expected = source
-                .iter()
-                .filter_map(|subscription| {
-                    crate::matching::match_subscription(subscription, &event)
-                        .map(|matched| (destination_key(subscription), matched))
-                })
-                .collect::<std::collections::BTreeMap<_, _>>();
-            let plan = MatchPlan::for_event(&event)?;
-            let blocks = self.posting_blocks(&plan)?;
-            let subscriptions = self.load_compiled_blocks(&blocks)?;
-            let rows = matcher.match_blocks(std::sync::Arc::new(event), blocks, &subscriptions);
-            let mut actual = std::collections::BTreeMap::new();
-            for row in rows {
-                let record = self
-                    .stored_subscription(row.subscription_id)?
-                    .context("sample match references a missing subscription")?;
-                actual.insert(
-                    destination_key(&record.subscription),
-                    crate::matching::ReferenceMatch {
-                        target_ordinal: row.target_ordinal,
-                        match_kind: row.match_kind,
-                        interruption_level: row.interruption_level,
-                    },
-                );
-            }
-            anyhow::ensure!(
-                actual == expected,
-                "sampled matcher result differs from source subscriptions"
-            );
-        }
-        Ok(())
     }
 
     pub(crate) fn begin_confirmation(

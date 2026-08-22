@@ -6,7 +6,6 @@ use url::{Host, Url};
 use zeroize::Zeroizing;
 
 const DEFAULT_DB_PATH: &str = "./data/disaster-alert.fjall";
-const LEGACY_DEFAULT_DB_PATH: &str = "./data/disaster-alert.db";
 
 /// Load configuration values from `.env` in the current working directory.
 /// Existing process environment variables take precedence.
@@ -282,18 +281,7 @@ fn env_string(name: &str, default: &str) -> String {
 fn configured_db_path() -> Result<String> {
     match env::var("DB_PATH") {
         Ok(value) => Ok(value),
-        Err(env::VarError::NotPresent) => {
-            if !std::path::Path::new(DEFAULT_DB_PATH).exists()
-                && std::path::Path::new(LEGACY_DEFAULT_DB_PATH).exists()
-            {
-                bail!(
-                    "legacy database {LEGACY_DEFAULT_DB_PATH} exists while the Fjall target \
-                     {DEFAULT_DB_PATH} does not; run disaster-alert-migrate and set DB_PATH to \
-                     the generated Fjall directory"
-                );
-            }
-            Ok(DEFAULT_DB_PATH.to_string())
-        }
+        Err(env::VarError::NotPresent) => Ok(DEFAULT_DB_PATH.to_string()),
         Err(error) => Err(error).context("failed to read DB_PATH"),
     }
 }

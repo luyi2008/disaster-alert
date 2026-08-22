@@ -4,7 +4,7 @@ info:
   version: 0.1.0
   description: |
     灾害预警 Bark 订阅系统的 JSON HTTP API。
-    首页和通知详情页返回 HTML，不属于本规范。
+    网页界面由独立仓库 disaster-alert-web 提供。
   license:
     name: Apache License 2.0
     identifier: Apache-2.0
@@ -16,6 +16,8 @@ tags:
     description: Bark 订阅管理
   - name: Metadata
     description: 前端配置与辅助数据
+  - name: Notifications
+    description: 通知详情（凭据在路径 token 中）
   - name: Operations
     description: 服务状态与健康检查
 paths:
@@ -180,6 +182,52 @@ paths:
                 $ref: "#/components/schemas/ReverseGeocodeApiResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/incidents/{incident_id}/notifications/{token}:
+    get:
+      tags: [Notifications]
+      operationId: getIncidentNotification
+      summary: 获取通知详情
+      description: |
+        校验 Bark 通知链接中的 token，返回通知时快照以及当前仍保留的事件记录。
+        无效 token 与未知 incident 均返回 404，不区分原因。
+      parameters:
+        - name: incident_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9_-]{22}$"
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 通知详情
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: private, no-store
+            Referrer-Policy:
+              schema:
+                type: string
+                const: no-referrer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IncidentDetailApiResponse"
+        "404":
+          description: 链接无效或详情不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
   /api/status:
@@ -602,6 +650,210 @@ components:
           type: string
         district:
           type: string
+    IncidentDetailApiResponse:
+      type: object
+      additionalProperties: false
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/IncidentDetail"
+    IncidentDetail:
+      type: object
+      additionalProperties: false
+      required: [snapshot]
+      properties:
+        snapshot:
+          $ref: "#/components/schemas/NotificationSnapshot"
+        incident:
+          oneOf:
+            - $ref: "#/components/schemas/IncidentView"
+            - type: "null"
+    NotificationSnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - incident_id
+        - issued_at_ms
+        - event
+        - target
+        - interruption_level
+        - matched_rule
+      properties:
+        incident_id:
+          type: string
+        issued_at_ms:
+          type: integer
+        event:
+          $ref: "#/components/schemas/PublicEvent"
+        target:
+          $ref: "#/components/schemas/NotificationTarget"
+        timing:
+          oneOf:
+            - $ref: "#/components/schemas/NotificationTiming"
+            - type: "null"
+        interruption_level:
+          type: string
+          enum: [passive, active, critical]
+        matched_rule:
+          $ref: "#/components/schemas/AlertRule"
+    PublicEvent:
+      type: object
+      additionalProperties: false
+      required:
+        - category
+        - source
+        - event_id
+        - revision
+        - report_num
+        - title
+        - description
+        - affected_regions
+        - level
+        - occurred_at
+        - final_report
+        - cancel
+        - training
+      properties:
+        category:
+          type: string
+          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+        source:
+          type: string
+        event_id:
+          type: string
+        revision:
+          type: string
+        report_num:
+          type: integer
+          minimum: 0
+        title:
+          type: string
+        description:
+          type: string
+        affected_regions:
+          type: array
+          items:
+            type: string
+        latitude:
+          type: [number, "null"]
+        longitude:
+          type: [number, "null"]
+        magnitude:
+          type: [number, "null"]
+        depth_km:
+          type: [number, "null"]
+        radius_km:
+          type: [number, "null"]
+        level:
+          type: integer
+        occurred_at:
+          type: string
+        final_report:
+          type: boolean
+        cancel:
+          type: boolean
+        training:
+          type: boolean
+    NotificationTarget:
+      type: object
+      additionalProperties: false
+      required: [label, latitude, longitude, province, city, district]
+      properties:
+        label:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        province:
+          type: string
+        city:
+          type: string
+        district:
+          type: string
+    NotificationTiming:
+      type: object
+      additionalProperties: false
+      required:
+        - epicentral_distance_km
+        - hypocentral_distance_km
+        - estimated_intensity
+        - p_arrival_at_ms
+        - s_arrival_at_ms
+      properties:
+        epicentral_distance_km:
+          type: number
+        hypocentral_distance_km:
+          type: number
+        estimated_intensity:
+          type: number
+        p_arrival_at_ms:
+          type: integer
+        s_arrival_at_ms:
+          type: integer
+    IncidentView:
+      type: object
+      additionalProperties: false
+      required: [id, category, updated_at_ms, latest_by_source, timeline]
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+        updated_at_ms:
+          type: integer
+        latest_by_source:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicEvent"
+        timeline:
+          type: array
+          items:
+            $ref: "#/components/schemas/IncidentReportSummary"
+    IncidentReportSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - category
+        - source
+        - report_num
+        - revision
+        - observed_at_ms
+        - level
+        - final_report
+        - cancel
+      properties:
+        category:
+          type: string
+          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+        source:
+          type: string
+        report_num:
+          type: integer
+        revision:
+          type: string
+        observed_at_ms:
+          type: integer
+        magnitude:
+          type: [number, "null"]
+        latitude:
+          type: [number, "null"]
+        longitude:
+          type: [number, "null"]
+        depth_km:
+          type: [number, "null"]
+        level:
+          type: integer
+        final_report:
+          type: boolean
+        cancel:
+          type: boolean
     StatusApiResponse:
       type: object
       additionalProperties: false
@@ -617,8 +869,11 @@ components:
     Status:
       type: object
       additionalProperties: false
-      required: [total_subscriptions, wolfx, fanstudio, huania, durable, ready_queues]
+      required: [instance_terms_accepted, total_subscriptions, wolfx, fanstudio, huania, durable, ready_queues]
       properties:
+        instance_terms_accepted:
+          type: boolean
+          description: 实例是否已设置 `INSTANCE_TERMS_ACCEPTED=true`。
         total_subscriptions:
           type: integer
           minimum: 0

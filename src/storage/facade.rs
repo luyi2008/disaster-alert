@@ -1,6 +1,4 @@
 use super::{FjallStorage, try_now_millis};
-#[cfg(feature = "migration")]
-use crate::models::Subscription;
 use crate::models::{IncidentId, IncidentRecord};
 use crate::subscriptions::SubscriptionManager;
 use anyhow::{Context, Result};
@@ -86,41 +84,6 @@ impl Storage {
 
     pub(crate) fn inner(&self) -> FjallStorage {
         self.inner.clone()
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn bind_subscription_migration(
-        &self,
-        source_fingerprint: [u8; 32],
-        existing_partial: bool,
-    ) -> Result<()> {
-        self.inner
-            .bind_migration_source(source_fingerprint, existing_partial)
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn verify_subscription_migration(&self, source_fingerprint: [u8; 32]) -> Result<()> {
-        self.inner.verify_migration_source(source_fingerprint)
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn verify_migration_postings(&self) -> Result<()> {
-        self.inner.verify_posting_consistency()
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn verify_migration_matches(&self, source: &[Subscription]) -> Result<()> {
-        self.inner.verify_sample_matches(source)
-    }
-
-    #[cfg(feature = "migration")]
-    pub(crate) fn migration_subscriptions(&self) -> Result<Vec<Subscription>> {
-        self.inner.active_subscriptions().map(|records| {
-            records
-                .into_iter()
-                .map(|record| record.subscription)
-                .collect()
-        })
     }
 }
 

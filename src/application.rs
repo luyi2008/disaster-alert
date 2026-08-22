@@ -4,8 +4,8 @@ use crate::lifecycle;
 use crate::providers::{FanStudioSource, HuaniaSource, WolfxSource};
 use crate::routes::{
     AppState, ReverseGeocoder, bark_urls_handler, health_handler, incident_detail_handler,
-    index_handler, reverse_geocode_handler, status_handler, subscribe_handler,
-    subscription_options_handler, unsubscribe_handler,
+    reverse_geocode_handler, status_handler, subscribe_handler, subscription_options_handler,
+    unsubscribe_handler,
 };
 use crate::runtime::{EventRuntime, RuntimeStatus};
 use crate::storage::{RetentionPolicy, Storage};
@@ -141,10 +141,8 @@ async fn run() -> Result<()> {
     let cors = build_cors_layer(&config)?;
 
     let app = Router::new()
-        .route("/", get(index_handler))
-        .route("/index.html", get(index_handler))
         .route(
-            "/incidents/{incident_id}/notifications/{token}",
+            "/api/incidents/{incident_id}/notifications/{token}",
             get(incident_detail_handler),
         )
         .route("/health", get(health_handler))

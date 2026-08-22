@@ -42,7 +42,7 @@ impl HuaniaSource {
         runtime_status: RuntimeStatus,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
-            .user_agent("disaster-alert/1.0 (https://github.com/noctiro/disaster-alert)")
+            .user_agent("disaster-alert/1.0 (https://github.com/luyi2008/disaster-alert)")
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(5))
             .redirect(reqwest::redirect::Policy::none())
