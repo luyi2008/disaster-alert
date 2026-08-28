@@ -62,18 +62,42 @@ cargo test
 
 ```rust
 tracing::info!(
-    event = "subscription.stored",
+    event = "subscription.request_completed",
     device_key = %mask_device_key(&device_key),
-    "subscription.stored"
+    "subscription.request_completed"
 );
 ```
 
 约定：
 
 - `event` 使用稳定英文标识，格式为 `domain.action`
-- Bark ID、token、URL 中的敏感部分必须脱敏
-- 错误日志保留 `error = ?error`，不要只写字符串
+- Bark Key、通知 token、URL 中的密钥查询参数必须脱敏：Bark Key 和 token 保留首尾各 3 位、中间 `***`（≤6 字符则全 `***`）；高德 `key` 等查询参数整段替换为 `***`
+- 日志可以输出 `latitude` / `longitude`
+- 意外失败用 `error = ?error`（Debug，保留错误链），不要只写字符串。预期的客户端拒绝（例如无效通知链接）可用 `error = %error`（Display）
 - 高频心跳、pong、重复事件使用 `debug`
+- 出站 HTTP 在 `info` 打 `outbound.http`（method、脱敏 URL、status、截断后的响应体）。入站 HTTP 由 `TraceLayer` 在 `info` 记录 method / 脱敏 URI / status，不记录请求体或响应体
+
+### 如何查看和控制日志
+
+日志写进程 stdout。Docker 下：
+
+```bash
+docker compose logs -f disaster-alert
+docker compose logs -f disaster-alert 2>&1 | grep outbound.http
+```
+
+本地 `cargo run` 时日志直接出现在终端。
+
+过滤器是环境变量 `RUST_LOG`（`tracing-subscriber` 的 EnvFilter，不是本项目自定义项）。未设置时默认为 `disaster_alert=info,tower_http=info`，即本 crate 与入站 `TraceLayer` 的 info 及以上（含 warn/error）。`debug` 默认关闭。进程环境变量优先于 `.env`。
+
+```dotenv
+# RUST_LOG=disaster_alert=debug,tower_http=info
+# RUST_LOG=disaster_alert=warn,tower_http=warn
+```
+
+生产默认会打：启动与关停、订阅写入/删除（Key 已脱敏）、数据源 WebSocket 连上、入站请求（method / 脱敏 URI / status）、每次出站 HTTP、以及 warn/error。生产默认不打：心跳/pong、`subscription.confirmation_attempt_completed`、入站请求体、完整 Bark Key、高德 Key、完整通知 token。
+
+`TraceLayer` 只覆盖打进本服务的入站请求，不会记录出站的高德 / Nominatim / Bark / Huania；那些走 `outbound.http`。
 
 注释只解释代码本身看不出的内容，例如上游字段拼写、时区、算法边界、平台限制和业务规则来源，不要写「创建变量」「保存数据」这类逐行复述，也不要写没有指标支撑的「高并发」「百万级」「优化版」
 
@@ -85,9 +109,9 @@ tracing::info!(
 - 不提供「输入 Bark Key 查询订阅详情」的接口，Bark Key 不能作为反查用户位置、地点名称、通知级别或订阅时间的凭据
 - 退订接口只返回操作结果，不回显订阅内容
 - 统计接口只返回聚合数量，不返回 Bark Key、位置或通知规则
-- 日志中只输出 `mask_device_key` 处理后的 Bark Key，不输出完整 Bark Key、精确位置和原始订阅请求体
+- 日志中只输出 `mask_device_key` 处理后的 Bark Key 和通知 token，不输出完整 Bark Key、高德 Key 和原始订阅请求体
 - 示例、测试、截图和 issue 不使用真实 Bark Key 或真实用户位置
 - 不提交真实 `.env`、数据库文件、Bark key、访问 token 或生产私密配置
 - 修改 CORS、反代或静态托管规则时，确认不会新增订阅详情读取面
 
-涉及隐私边界的 PR 或提交说明里，需要明确写出是否新增了读取接口、是否回显订阅数据、日志里是否可能出现完整 Bark Key 或位置
+涉及隐私边界的 PR 或提交说明里，需要明确写出是否新增了读取接口、是否回显订阅数据、日志里是否可能出现完整 Bark Key

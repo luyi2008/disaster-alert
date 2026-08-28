@@ -1,6 +1,5 @@
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
@@ -188,7 +187,7 @@ impl ReverseGeocoder {
                     tracing::warn!(
                         event = "reverse_geocode.amap_failed",
                         elapsed_ms = started.elapsed().as_millis() as u64,
-                        error = %error,
+                        error = ?error,
                         "reverse_geocode.amap_failed"
                     );
                 }
@@ -264,20 +263,19 @@ impl EnabledGeocoder {
             .append_pair("location", &format!("{longitude:.6},{latitude:.6}"))
             .append_pair("extensions", "base")
             .append_pair("output", "json");
-        let response = match self.client.get(url).send().await {
-            Ok(response) => response,
-            Err(error) => {
-                bail!(
-                    "amap reverse geocoding request failed ({})",
-                    reqwest_error_kind(&error)
-                );
-            }
-        };
-        let status = response.status();
+        let (status, body) = crate::utils::outbound_log::get_logged(
+            &self.client,
+            "amap",
+            url,
+            MAX_RESPONSE_BYTES,
+            "reverse geocoding response",
+        )
+        .await?;
         if !status.is_success() {
             bail!("amap reverse geocoding service returned an error ({status})");
         }
-        let parsed = limited_response_json::<AmapResponse>(response).await?;
+        let parsed = serde_json::from_slice::<AmapResponse>(&body)
+            .context("invalid reverse geocoding response")?;
         parsed.into_result()
     }
 
@@ -294,15 +292,19 @@ impl EnabledGeocoder {
             .append_pair("zoom", "14")
             .append_pair("lat", &latitude.to_string())
             .append_pair("lon", &longitude.to_string());
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .context("reverse geocoding request failed")?
-            .error_for_status()
-            .context("reverse geocoding service returned an error")?;
-        let response = limited_response_json::<NominatimResponse>(response).await?;
+        let (status, body) = crate::utils::outbound_log::get_logged(
+            &self.client,
+            "nominatim",
+            url,
+            MAX_RESPONSE_BYTES,
+            "reverse geocoding response",
+        )
+        .await?;
+        if !status.is_success() {
+            bail!("reverse geocoding service returned an error ({status})");
+        }
+        let response = serde_json::from_slice::<NominatimResponse>(&body)
+            .context("invalid reverse geocoding response")?;
         anyhow::ensure!(
             response.error.as_deref().is_none_or(str::is_empty),
             "reverse geocoding service rejected the coordinates"
@@ -327,27 +329,6 @@ impl EnabledGeocoder {
             }
         }
     }
-}
-
-async fn limited_response_json<T: DeserializeOwned>(mut response: reqwest::Response) -> Result<T> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-    {
-        bail!("reverse geocoding response exceeded size limit");
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .context("failed to read reverse geocoding response")?
-    {
-        if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-            bail!("reverse geocoding response exceeded size limit");
-        }
-        body.extend_from_slice(&chunk);
-    }
-    serde_json::from_slice(&body).context("invalid reverse geocoding response")
 }
 
 impl CoordinateKey {
@@ -453,18 +434,6 @@ fn first_non_empty<const N: usize>(values: [Option<String>; N]) -> String {
         .map(|value| value.trim().to_string())
         .find(|value| !value.is_empty())
         .unwrap_or_default()
-}
-
-fn reqwest_error_kind(error: &reqwest::Error) -> &'static str {
-    if error.is_timeout() {
-        "timeout"
-    } else if error.is_connect() {
-        "connect"
-    } else if error.is_request() {
-        "request"
-    } else {
-        "transport"
-    }
 }
 
 fn deserialize_amap_text<'de, D>(deserializer: D) -> Result<String, D::Error>

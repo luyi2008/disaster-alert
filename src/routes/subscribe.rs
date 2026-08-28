@@ -411,14 +411,14 @@ pub(crate) async fn unsubscribe_handler(
                 Json(ApiResponse::<()>::success("已取消订阅", None)),
             )
         }
-        Err(e) => {
+        Err(error) => {
             tracing::error!(
                 event = "subscription.delete_failed",
                 device_key = %mask_device_key(&destination_id.device_key),
-                error = ?e,
+                error = ?error,
                 "subscription.delete_failed"
             );
-            let status = match e {
+            let status = match error {
                 DeleteSubscriptionError::NotFound => StatusCode::NOT_FOUND,
                 DeleteSubscriptionError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
             };

@@ -66,6 +66,15 @@ docker compose ps
 docker compose logs -f disaster-alert
 ```
 
+默认日志级别是 `info`（含 warn/error）。过滤器为环境变量 `RUST_LOG`；未设置时等价于 `disaster_alert=info,tower_http=info`。入站请求由 `TraceLayer` 记录，出站 HTTP（高德、Nominatim、Bark、Huania）记录为 `outbound.http`。需要更详细或更安静时：
+
+```dotenv
+# RUST_LOG=disaster_alert=debug,tower_http=info
+# RUST_LOG=disaster_alert=warn,tower_http=warn
+```
+
+本地 `cargo run` 时日志在进程终端。完整约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 可选应用配置见[配置](#配置)。
 
 生产环境也可以不在主机上构建，改为拉取 CI 推送的镜像：
@@ -146,6 +155,17 @@ docker compose up -d --no-build
 
 数据库目录只能由一个应用实例使用，不要增加 `disaster-alert` 服务的副本数。Compose 会等待服务优雅退出并完成数据库刷盘。
 
+### 日志
+
+容器日志即进程 stdout：
+
+```bash
+docker compose logs -f disaster-alert
+docker compose logs -f disaster-alert 2>&1 | grep outbound.http
+```
+
+`RUST_LOG` 控制 `tracing` 过滤器（进程环境优先于 `.env`）。生产未设置时默认 `info`：生命周期、订阅变更、入站 HTTP、出站 `outbound.http`、warn/error。心跳和确认完成等 `debug` 事件默认不输出。
+
 ## 配置
 
 应用会读取当前工作目录下的 `.env`。进程环境变量优先于 `.env`；完整示例见 [.env.example](.env.example)。
@@ -161,6 +181,7 @@ docker compose up -d --no-build
 | `ALLOWED_ORIGINS` | 空 | 允许访问 API 的前端 Origin，多个值用逗号分隔 |
 | `DB_PATH` | `./data/disaster-alert.fjall` | 数据库目录；同一目录只能由一个应用实例使用 |
 | `SHUTDOWN_TIMEOUT_SECONDS` | `15` | 服务关闭时的最长等待时间，范围 `1..=300` 秒 |
+| `RUST_LOG` | `disaster_alert=info,tower_http=info` | `tracing` 日志过滤器。未设置时使用该默认值 |
 
 ### Bark
 

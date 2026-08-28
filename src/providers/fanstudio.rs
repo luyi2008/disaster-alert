@@ -200,6 +200,7 @@ impl FanStudioSource {
                                             self.runtime_status.fanstudio().record_parse_error();
                                             tracing::warn!(
                                                 event = "fanstudio.invalid_cursor",
+                                                source,
                                                 error = ?error,
                                                 "fanstudio.invalid_cursor"
                                             );

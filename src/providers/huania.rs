@@ -7,7 +7,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use reqwest::Url;
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::Deserialize;
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -223,15 +223,19 @@ impl HuaniaSource {
     }
 
     async fn fetch(&self, url: Url) -> Result<Vec<HuaniaEarthquakeDto>> {
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .context("Huania request failed")?
-            .error_for_status()
-            .context("Huania service returned an HTTP error")?;
-        let response = limited_response_json::<HuaniaResponse>(response).await?;
+        let (status, body) = crate::utils::outbound_log::get_logged(
+            &self.client,
+            "huania",
+            url,
+            MAX_RESPONSE_BYTES,
+            "Huania response",
+        )
+        .await?;
+        if !status.is_success() {
+            bail!("Huania service returned an HTTP error ({status})");
+        }
+        let response = serde_json::from_slice::<HuaniaResponse>(&body)
+            .context("failed to parse Huania response")?;
         if response.code != 0 {
             bail!(
                 "Huania service returned code {}: {}",
@@ -260,27 +264,6 @@ async fn wait_or_shutdown(delay: Duration, shutdown: &mut watch::Receiver<bool>)
         result = shutdown.changed() => result.is_err() || *shutdown.borrow(),
         () = tokio::time::sleep(delay) => false,
     }
-}
-
-async fn limited_response_json<T: DeserializeOwned>(mut response: reqwest::Response) -> Result<T> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-    {
-        bail!("Huania response exceeds {MAX_RESPONSE_BYTES} bytes");
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .context("failed to read Huania response")?
-    {
-        if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-            bail!("Huania response exceeds {MAX_RESPONSE_BYTES} bytes");
-        }
-        body.extend_from_slice(&chunk);
-    }
-    serde_json::from_slice(&body).context("failed to parse Huania response")
 }
 
 #[derive(Debug, Deserialize)]

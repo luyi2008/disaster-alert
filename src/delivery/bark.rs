@@ -306,7 +306,16 @@ impl BarkNotifier {
             Some(permit) => permit,
             None => self.acquire_permit().await?,
         };
-        let response = match self.client.post(&url).json(&payload).send().await {
+        let (status, body) = match crate::utils::outbound_log::post_json_logged(
+            &self.client,
+            "bark",
+            &url,
+            &payload,
+            MAX_RESPONSE_BYTES,
+            "Bark response",
+        )
+        .await
+        {
             Ok(response) => response,
             Err(error) => {
                 tracing::error!(
@@ -318,23 +327,10 @@ impl BarkNotifier {
                 return Err(BarkDeliveryError::transient(error));
             }
         };
-        let status = response.status();
         let status_code = status.as_u16();
-        let body_text = limited_response_text(response).await.map_err(|error| {
-            if status.is_success() || bark_failure_is_transient(status) {
-                BarkDeliveryError::transient(error)
-            } else {
-                BarkDeliveryError::permanent(error)
-            }
-        })?;
+        let body_text = String::from_utf8_lossy(&body).into_owned();
         let outcome = classify_bark_response(status, &body_text);
         if outcome.is_ok() {
-            tracing::debug!(
-                event = "bark.push_succeeded",
-                device_key = %mask_device_key(device_key),
-                status = status_code,
-                "bark.push_succeeded"
-            );
             return Ok(());
         }
         if status.is_client_error() || status.is_success() {
@@ -612,27 +608,6 @@ fn sanitize_provider_message(message: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
-}
-
-async fn limited_response_text(mut response: reqwest::Response) -> Result<String> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
-    {
-        anyhow::bail!("Bark response exceeded size limit");
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .context("failed to read Bark response")?
-    {
-        if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-            anyhow::bail!("Bark response exceeded size limit");
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
 fn truncate_chars(value: &str, max_chars: usize) -> String {

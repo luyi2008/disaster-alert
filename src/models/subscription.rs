@@ -446,18 +446,7 @@ pub struct UnsubscribeRequest {
 }
 
 pub fn mask_device_key(value: &str) -> String {
-    let value = value.trim();
-    let chars = value.chars().collect::<Vec<_>>();
-    if chars.len() <= 6 {
-        "***".to_string()
-    } else {
-        let prefix = chars.iter().take(3).collect::<String>();
-        let suffix = chars
-            .iter()
-            .skip(chars.len().saturating_sub(3))
-            .collect::<String>();
-        format!("{}***{}", prefix, suffix)
-    }
+    crate::utils::outbound_log::mask_middle(value)
 }
 
 #[derive(Debug, Serialize)]
@@ -682,5 +671,11 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn mask_device_key_hides_short_keys_and_the_middle_of_long_keys() {
+        assert_eq!(mask_device_key("abc123"), "***");
+        assert_eq!(mask_device_key("barkdevicekey"), "bar***key");
     }
 }
