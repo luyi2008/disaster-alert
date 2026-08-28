@@ -59,13 +59,31 @@ jobs:
       - name: Materialize env file
         env:
           DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
+          AMAP_KEY: ${{ secrets.AMAP_KEY }}
+          AMAP_REGEO_URL: ${{ secrets.AMAP_REGEO_URL }}
         run: |
           if [ -z "$DEPLOY_ENV_FILE" ]; then
             echo "DEPLOY_ENV_FILE is not set or empty" >&2
             exit 1
           fi
           umask 077
-          printf '%s\n' "$DEPLOY_ENV_FILE" > .env
+          printf '%s\n' "$DEPLOY_ENV_FILE" | awk '
+            /^AMAP_KEY=/ { next }
+            /^AMAP_REGEO_URL=/ { next }
+            { print }
+          ' > .env
+          if [ -n "${AMAP_KEY}" ]; then
+            printf 'AMAP_KEY=%s\n' "$AMAP_KEY" >> .env
+            echo "amap key overlay: present"
+          else
+            echo "amap key overlay: absent"
+          fi
+          if [ -n "${AMAP_REGEO_URL}" ]; then
+            printf 'AMAP_REGEO_URL=%s\n' "$AMAP_REGEO_URL" >> .env
+            echo "amap regeo url overlay: present"
+          else
+            echo "amap regeo url overlay: absent"
+          fi
 
       - name: Copy Compose file and env to host
         uses: appleboy/scp-action@v1.0.0

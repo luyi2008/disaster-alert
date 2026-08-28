@@ -84,10 +84,10 @@ docker compose up -d --no-build
 
 1. 构建镜像并上传到 `ghcr.io/<owner>/<repo>:latest`（同时打提交 SHA 标签；不是 Docker Hub）
 2. 把当前提交的 `compose.yaml` 拷到主机上的部署目录
-3. 把 GitHub Secret `DEPLOY_ENV_FILE` 写成该目录下的 `.env`（覆盖已有文件）
+3. 把 GitHub Secret `DEPLOY_ENV_FILE` 写成该目录下的 `.env`（覆盖已有文件）。若同时配置了 `AMAP_KEY` / `AMAP_REGEO_URL`，部署会把这两项覆盖进 `.env`（不会打印 Key）
 4. 用本次 job 的 `GITHUB_TOKEN` 登录 `ghcr.io`、拉取镜像，并以 `--no-build` 重启容器
 
-`DEPLOY_ENV_FILE` 不是仓库里的文件。它是一个 Actions Secret 的**名字**；**值**是生产环境整份 `.env` 文本（与 [.env.example](.env.example) 同结构，填真实配置）。Compose 仍通过 `env_file: .env` 读主机上的文件；应用进程看不到这个 Secret 名。
+`DEPLOY_ENV_FILE` 不是仓库里的文件。它是一个 Actions Secret 的**名字**；**值**是生产环境整份 `.env` 文本（与 [.env.example](.env.example) 同结构，填真实配置）。单独的 `AMAP_KEY` Secret **不会**自动变成容器环境变量，除非走上面的部署覆盖。Compose 仍通过 `env_file: .env` 读主机上的文件；应用进程看不到这些 Secret 名。
 
 需要在本仓库 Settings → Secrets and variables → Actions 配置：
 
@@ -98,8 +98,10 @@ docker compose up -d --no-build
 | `DEPLOY_SSH_KEY` | 该用户的私钥（仅用于部署） |
 | `DEPLOY_PATH` | 主机上放置 `compose.yaml` 与 `.env` 的目录，例如 `/opt/disaster-alert` |
 | `DEPLOY_ENV_FILE` | 整份生产 `.env` 文本。第一次把 ECS 上现有 `.env` 贴进去，避免首次部署写成空文件 |
+| `AMAP_KEY` | 可选。高德 Web 服务 Key；部署时写入主机 `.env` |
+| `AMAP_REGEO_URL` | 可选。高德逆地理编码 URL；部署时写入主机 `.env` |
 
-日常改业务配置：在 GitHub 里编辑 `DEPLOY_ENV_FILE`，然后手动运行该 workflow（`workflow_dispatch`）或等下次合进 `main`。每次部署都会覆盖主机上的 `.env`，不要在 ECS 上改完还指望能留下。私钥不进 git、不进镜像。
+日常改业务配置：在 GitHub 里编辑 `DEPLOY_ENV_FILE`（或上述高德 Secret），然后手动运行该 workflow（`workflow_dispatch`）或等下次合进 `main`。每次部署都会覆盖主机上的 `.env`，不要在 ECS 上改完还指望能留下。私钥不进 git、不进镜像。
 
 首次在 ECS 上准备一次即可：安装 Docker 与 Compose 插件、把部署公钥写入 `authorized_keys`、创建可写的 `DEPLOY_PATH`。安全组放行 SSH（建议限制来源），应用端口继续只绑 `127.0.0.1`，对外 HTTPS 由主机上的反向代理处理（配置不在本仓库）。数据库在 Docker 命名卷里，换镜像不会删除。
 
