@@ -731,14 +731,14 @@ impl FjallStorage {
     }
 
     pub(crate) fn list_active_device_keys(&self) -> Result<Vec<String>> {
-        let mut keys = std::collections::BTreeSet::new();
+        let mut keys = Vec::new();
         for item in self.subscriptions.iter() {
             let record: StoredSubscription = decode(&item.value()?)?;
             if record.active {
-                keys.insert(record.subscription.device_key().to_string());
+                keys.push(record.subscription.device_key().to_string());
             }
         }
-        Ok(keys.into_iter().collect())
+        Ok(keys)
     }
 
     pub(crate) fn active_subscriptions_by_device_key(
@@ -2231,7 +2231,7 @@ mod tests {
     }
 
     #[test]
-    fn active_device_key_listing_skips_inactive_and_deduplicates() -> Result<()> {
+    fn active_device_key_listing_skips_inactive_and_keeps_duplicates() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = FjallStorage::open(directory.path())?;
         storage.store_subscription(subscription())?;
@@ -2247,6 +2247,14 @@ mod tests {
             device_key: "device1".to_string(),
         };
         storage.store_subscription(same_key_other_url)?;
+        anyhow::ensure!(
+            storage.list_active_device_keys()?
+                == [
+                    "device1".to_string(),
+                    "device2".to_string(),
+                    "device1".to_string()
+                ]
+        );
         let first = storage
             .stored_subscription_by_destination(&crate::models::DestinationId {
                 base_url: "https://api.day.app".to_string(),
@@ -2256,7 +2264,7 @@ mod tests {
         storage.deactivate_subscription(first.id)?;
 
         anyhow::ensure!(
-            storage.list_active_device_keys()? == ["device1".to_string(), "device2".to_string()]
+            storage.list_active_device_keys()? == ["device2".to_string(), "device1".to_string()]
         );
         let by_device1 = storage.active_subscriptions_by_device_key("device1")?;
         anyhow::ensure!(by_device1.len() == 1);
