@@ -192,13 +192,22 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `P_WAVE_KM_S` | `6.0` | P 波估算速度，单位 km/s |
 | `S_WAVE_KM_S` | `3.5` | S 波估算速度，单位 km/s |
 
-其余环境变量用于数据保留、Bark 并发和反向地理编码，默认值见 [.env.example](.env.example)。
+### 反向地理编码
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `REVERSE_GEOCODING_ENABLED` | `true` | 是否启用 `/api/reverse-geocode` |
+| `REVERSE_GEOCODING_URL` | `https://nominatim.openstreetmap.org/reverse` | Nominatim 备用接口。阿里云 ECS 等访问境外超时的环境应配置 `AMAP_KEY` |
+| `AMAP_KEY` | 空 | 可选。高德开放平台 **Web 服务** Key；设置后优先走高德逆地理编码，失败再回退 Nominatim |
+| `AMAP_REGEO_URL` | `https://restapi.amap.com/v3/geocode/regeo` | 高德逆地理编码地址，仅在设置了 `AMAP_KEY` 时使用 |
+
+其余环境变量用于数据保留和 Bark 并发，默认值见 [.env.example](.env.example)。
 
 ## 安全与隐私
 
 服务会保存 Bark Key、监测地点和通知规则。通知详情 URL 包含访问凭据，反向代理、CDN、WAF、APM 和分析系统不得记录 `/incidents/` 路径的完整 URL。
 
-- 不要提交真实 `.env`、数据库、Bark Key 或签名私钥
+- 不要提交真实 `.env`、数据库、Bark Key、高德 Key 或签名私钥
 - 不要在日志、截图、Issue 或测试数据中使用真实 Bark Key、用户位置或通知详情 URL
 - 修改 `ALERT_SIGNING_KEY` 后，之前发送的详情链接会失效
 - 统计接口只返回聚合数量，系统不提供通过 Bark Key 查询订阅内容的接口

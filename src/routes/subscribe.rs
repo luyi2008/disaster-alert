@@ -24,6 +24,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_LOCATIONS: usize = 3;
@@ -106,6 +107,7 @@ pub(crate) async fn reverse_geocode_handler(
             Json(ApiResponse::<ReverseGeocodeResult>::error("坐标无效")),
         );
     }
+    let started = Instant::now();
     match state
         .reverse_geocoder
         .resolve(query.latitude, query.longitude)
@@ -120,6 +122,7 @@ pub(crate) async fn reverse_geocode_handler(
                 event = "reverse_geocode.failed",
                 latitude = query.latitude,
                 longitude = query.longitude,
+                elapsed_ms = started.elapsed().as_millis() as u64,
                 error = ?error,
                 "reverse_geocode.failed"
             );
