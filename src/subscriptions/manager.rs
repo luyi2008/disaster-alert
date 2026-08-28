@@ -126,6 +126,17 @@ impl SubscriptionManager {
         self.storage.active_subscription_count()
     }
 
+    pub(crate) fn list_active_device_keys(&self) -> Result<Vec<String>> {
+        self.storage.list_active_device_keys()
+    }
+
+    pub(crate) fn active_subscriptions_by_device_key(
+        &self,
+        device_key: &str,
+    ) -> Result<Vec<Subscription>> {
+        self.storage.active_subscriptions_by_device_key(device_key)
+    }
+
     pub(crate) fn begin_confirmation(
         &self,
         subscription: Subscription,
@@ -419,6 +430,28 @@ mod tests {
         anyhow::ensure!(manager.get_subscription(&destination)?.is_none());
         anyhow::ensure!(!manager.activate_confirmation(pending.id, pending.lease_token)?);
         anyhow::ensure!(manager.pending_confirmation_count()? == 0);
+        Ok(())
+    }
+
+    #[test]
+    fn active_device_key_queries_ignore_unsubscribed_records() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        let manager = SubscriptionManager::new(storage);
+        let active = manager.begin_confirmation(subscription(), 100, 1_000)?;
+        anyhow::ensure!(manager.activate_confirmation(active.id, active.lease_token)?);
+        let destination = active.subscription.destination_id();
+
+        anyhow::ensure!(manager.list_active_device_keys()? == ["device1".to_string()]);
+        anyhow::ensure!(manager.active_subscriptions_by_device_key("device1")?.len() == 1);
+
+        manager.delete_subscription(&destination)?;
+        anyhow::ensure!(manager.list_active_device_keys()?.is_empty());
+        anyhow::ensure!(
+            manager
+                .active_subscriptions_by_device_key("device1")?
+                .is_empty()
+        );
         Ok(())
     }
 

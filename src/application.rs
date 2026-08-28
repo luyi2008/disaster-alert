@@ -3,9 +3,9 @@ use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
 use crate::lifecycle;
 use crate::providers::{FanStudioSource, HuaniaSource, WolfxSource};
 use crate::routes::{
-    AppState, ReverseGeocoder, bark_urls_handler, health_handler, incident_detail_handler,
-    reverse_geocode_handler, status_handler, subscribe_handler, subscription_options_handler,
-    unsubscribe_handler,
+    AppState, ReverseGeocoder, admin_device_keys_handler, admin_subscriptions_handler,
+    bark_urls_handler, health_handler, incident_detail_handler, reverse_geocode_handler,
+    status_handler, subscribe_handler, subscription_options_handler, unsubscribe_handler,
 };
 use crate::runtime::{EventRuntime, RuntimeStatus};
 use crate::storage::{RetentionPolicy, Storage};
@@ -163,6 +163,8 @@ async fn run() -> Result<()> {
             delete(unsubscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
         )
         .route("/api/status", get(status_handler))
+        .route("/api/admin/device-keys", get(admin_device_keys_handler))
+        .route("/api/admin/subscriptions", get(admin_subscriptions_handler))
         .layer(cors)
         .layer(CompressionLayer::new())
         .layer(

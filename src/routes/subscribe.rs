@@ -35,7 +35,7 @@ const INSTANCE_TERMS_REQUIRED_MESSAGE: &str = "当前实例尚未确认部署责
 pub(crate) struct AppState {
     pub(crate) instance_terms_accepted: bool,
     pub(crate) storage: Storage,
-    subscriptions: SubscriptionManager,
+    pub(crate) subscriptions: SubscriptionManager,
     bark_notifier: BarkNotifier,
     bark_urls: Vec<String>,
     runtime_status: RuntimeStatus,
@@ -469,7 +469,7 @@ fn normalize_targets(mut targets: Vec<MonitoringTarget>) -> Result<Vec<Monitorin
     Ok(targets)
 }
 
-fn validate_device_key(raw: &str) -> std::result::Result<String, (StatusCode, String)> {
+pub(crate) fn validate_device_key(raw: &str) -> std::result::Result<String, (StatusCode, String)> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "Bark Key 不能为空".to_string()));

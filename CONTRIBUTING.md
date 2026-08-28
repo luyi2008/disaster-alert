@@ -105,13 +105,13 @@ docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 
 这个项目会保存 Bark Key、监测地点和通知级别，任何相关改动都要先确认下面几条约束：
 
-- 只允许通过 `POST /api/subscribe` 创建或覆盖订阅，通过 `DELETE /api/unsubscribe` 删除订阅
-- 不提供「输入 Bark Key 查询订阅详情」的接口，Bark Key 不能作为反查用户位置、地点名称、通知级别或订阅时间的凭据
+- 用户面只允许通过 `POST /api/subscribe` 创建或覆盖订阅，通过 `DELETE /api/unsubscribe` 删除订阅
+- 另有未写入 README / OpenAPI 的运营只读接口：列出当前激活订阅的 Bark Key，以及按 Key 返回地点和规则。当前无鉴权，后续补上；不要把这些路径写进用户文档
 - 退订接口只返回操作结果，不回显订阅内容
-- 统计接口只返回聚合数量，不返回 Bark Key、位置或通知规则
-- 日志中只输出 `mask_device_key` 处理后的 Bark Key 和通知 token，不输出完整 Bark Key、高德 Key 和原始订阅请求体
+- 公开的统计接口只返回聚合数量，不返回 Bark Key、位置或通知规则
+- 日志中只输出 `mask_device_key` 处理后的 Bark Key 和通知 token，不输出完整 Bark Key、高德 Key 和原始订阅请求体；入站 URI 中的 `device_key` 查询参数同样必须脱敏
 - 示例、测试、截图和 issue 不使用真实 Bark Key 或真实用户位置
 - 不提交真实 `.env`、数据库文件、Bark key、访问 token 或生产私密配置
-- 修改 CORS、反代或静态托管规则时，确认不会新增订阅详情读取面
+- 修改 CORS、反代或静态托管规则时，确认不会把未鉴权的订阅详情读取面暴露给非运营调用方
 
 涉及隐私边界的 PR 或提交说明里，需要明确写出是否新增了读取接口、是否回显订阅数据、日志里是否可能出现完整 Bark Key
