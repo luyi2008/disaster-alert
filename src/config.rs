@@ -54,6 +54,8 @@ pub(crate) struct Config {
     pub(crate) http_pool_size: usize,
     pub(crate) reverse_geocoding_enabled: bool,
     pub(crate) reverse_geocoding_url: String,
+    pub(crate) amap_regeo_url: String,
+    pub(crate) amap_key: Option<SecretString>,
 }
 
 impl Config {
@@ -105,6 +107,11 @@ impl Config {
                 "REVERSE_GEOCODING_URL",
                 "https://nominatim.openstreetmap.org/reverse",
             ),
+            amap_regeo_url: env_string(
+                "AMAP_REGEO_URL",
+                "https://restapi.amap.com/v3/geocode/regeo",
+            ),
+            amap_key: optional_env_secret("AMAP_KEY")?,
         };
         config.validate()?;
         Ok(config)
@@ -176,6 +183,9 @@ impl Config {
         }
         if self.reverse_geocoding_enabled {
             validate_http_url("REVERSE_GEOCODING_URL", &self.reverse_geocoding_url)?;
+            if self.amap_key.is_some() {
+                validate_http_url("AMAP_REGEO_URL", &self.amap_regeo_url)?;
+            }
         }
         Ok(())
     }
@@ -303,6 +313,23 @@ fn required_env_secret(name: &str) -> Result<SecretString> {
         bail!("{name} cannot be empty");
     }
     Ok(SecretString(trimmed))
+}
+
+fn optional_env_secret(name: &str) -> Result<Option<SecretString>> {
+    match env::var(name) {
+        Ok(value) => {
+            let mut value = Zeroizing::new(value);
+            let trimmed = Zeroizing::new(value.trim().to_string());
+            value.clear();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(SecretString(trimmed)))
+            }
+        }
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(error).with_context(|| format!("failed to read {name}")),
+    }
 }
 
 fn env_list(name: &str) -> Vec<String> {

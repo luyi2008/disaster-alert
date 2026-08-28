@@ -1,11 +1,13 @@
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use url::Url;
+use zeroize::Zeroizing;
 
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MIN_REQUEST_INTERVAL: Duration = Duration::from_secs(1);
@@ -25,17 +27,23 @@ pub(crate) struct ReverseGeocoder {
 }
 
 struct EnabledGeocoder {
-    endpoint: Url,
+    nominatim_endpoint: Url,
+    amap: Option<AmapProvider>,
     client: reqwest::Client,
     state: Arc<Mutex<GeocoderState>>,
     coordinate_locks: Arc<StdMutex<HashMap<CoordinateKey, Weak<Mutex<()>>>>>,
+}
+
+struct AmapProvider {
+    endpoint: Url,
+    key: Zeroizing<String>,
 }
 
 #[derive(Default)]
 struct GeocoderState {
     cache: HashMap<CoordinateKey, CacheEntry>,
     cache_order: VecDeque<CoordinateKey>,
-    last_request: Option<Instant>,
+    last_nominatim_request: Option<Instant>,
 }
 
 struct CacheEntry {
@@ -53,6 +61,8 @@ struct CoordinateKey {
 struct NominatimResponse {
     #[serde(default)]
     address: NominatimAddress,
+    #[serde(default)]
+    display_name: Option<String>,
     error: Option<String>,
 }
 
@@ -71,11 +81,35 @@ struct NominatimAddress {
     suburb: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct AmapResponse {
+    status: String,
+    regeocode: Option<AmapRegeocode>,
+}
+
+#[derive(Deserialize)]
+struct AmapRegeocode {
+    #[serde(default, rename = "addressComponent")]
+    address_component: Option<AmapAddressComponent>,
+}
+
+#[derive(Default, Deserialize)]
+struct AmapAddressComponent {
+    #[serde(default, deserialize_with = "deserialize_amap_text")]
+    province: String,
+    #[serde(default, deserialize_with = "deserialize_amap_text")]
+    city: String,
+    #[serde(default, deserialize_with = "deserialize_amap_text")]
+    district: String,
+}
+
 impl ReverseGeocoder {
     pub(crate) fn new(config: &Config) -> Result<Self> {
         Self::from_settings(
             config.reverse_geocoding_enabled,
             &config.reverse_geocoding_url,
+            &config.amap_regeo_url,
+            config.amap_key.as_ref().map(|key| key.expose()),
         )
     }
 
@@ -84,12 +118,26 @@ impl ReverseGeocoder {
         Self { enabled: None }
     }
 
-    fn from_settings(enabled: bool, reverse_geocoding_url: &str) -> Result<Self> {
+    fn from_settings(
+        enabled: bool,
+        reverse_geocoding_url: &str,
+        amap_regeo_url: &str,
+        amap_key: Option<&str>,
+    ) -> Result<Self> {
         if !enabled {
             return Ok(Self { enabled: None });
         }
-        let endpoint =
+        let nominatim_endpoint =
             Url::parse(reverse_geocoding_url).context("failed to parse reverse geocoding URL")?;
+        let amap_key = amap_key.map(str::trim).filter(|key| !key.is_empty());
+        let amap = match amap_key {
+            Some(key) => Some(AmapProvider {
+                endpoint: Url::parse(amap_regeo_url)
+                    .context("failed to parse Amap reverse geocoding URL")?,
+                key: Zeroizing::new(key.to_string()),
+            }),
+            None => None,
+        };
         let client = reqwest::Client::builder()
             .user_agent("disaster-alert/1.0 (https://github.com/luyi2008/disaster-alert)")
             .connect_timeout(Duration::from_secs(3))
@@ -99,7 +147,8 @@ impl ReverseGeocoder {
             .build()?;
         Ok(Self {
             enabled: Some(Arc::new(EnabledGeocoder {
-                endpoint,
+                nominatim_endpoint,
+                amap,
                 client,
                 state: Arc::new(Mutex::new(GeocoderState::default())),
                 coordinate_locks: Arc::new(StdMutex::new(HashMap::new())),
@@ -122,30 +171,27 @@ impl ReverseGeocoder {
         if let Some(cached) = enabled.cached(key).await {
             return Ok(cached);
         }
-        enabled.acquire_request_slot().await;
 
-        let mut url = enabled.endpoint.clone();
-        url.query_pairs_mut()
-            .append_pair("format", "jsonv2")
-            .append_pair("addressdetails", "1")
-            .append_pair("accept-language", "zh-CN,zh,en")
-            .append_pair("zoom", "14")
-            .append_pair("lat", &latitude.to_string())
-            .append_pair("lon", &longitude.to_string());
-        let response = enabled
-            .client
-            .get(url)
-            .send()
-            .await
-            .context("reverse geocoding request failed")?
-            .error_for_status()
-            .context("reverse geocoding service returned an error")?;
-        let response = limited_response_json(response).await?;
-        anyhow::ensure!(
-            response.error.as_deref().is_none_or(str::is_empty),
-            "reverse geocoding service rejected the coordinates"
-        );
-        let value = response.address.into_result();
+        if enabled.amap.is_some() {
+            let started = Instant::now();
+            match enabled.lookup_amap(latitude, longitude).await {
+                Ok(value) => {
+                    enabled.cache(key, value.clone()).await;
+                    return Ok(value);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        event = "reverse_geocode.amap_failed",
+                        elapsed_ms = started.elapsed().as_millis() as u64,
+                        error = %error,
+                        "reverse_geocode.amap_failed"
+                    );
+                }
+            }
+        }
+
+        enabled.acquire_nominatim_slot().await;
+        let value = enabled.lookup_nominatim(latitude, longitude).await?;
         enabled.cache(key, value.clone()).await;
         Ok(value)
     }
@@ -175,22 +221,22 @@ impl EnabledGeocoder {
             .map(|entry| entry.value.clone())
     }
 
-    async fn acquire_request_slot(&self) {
+    async fn acquire_nominatim_slot(&self) {
         loop {
             let delay = {
                 let mut state = self.state.lock().await;
-                match state.last_request {
+                match state.last_nominatim_request {
                     Some(last_request) => {
                         let elapsed = last_request.elapsed();
                         if elapsed < MIN_REQUEST_INTERVAL {
                             Some(MIN_REQUEST_INTERVAL - elapsed)
                         } else {
-                            state.last_request = Some(Instant::now());
+                            state.last_nominatim_request = Some(Instant::now());
                             None
                         }
                     }
                     None => {
-                        state.last_request = Some(Instant::now());
+                        state.last_nominatim_request = Some(Instant::now());
                         None
                     }
                 }
@@ -200,6 +246,63 @@ impl EnabledGeocoder {
             };
             tokio::time::sleep(delay).await;
         }
+    }
+
+    async fn lookup_amap(&self, latitude: f64, longitude: f64) -> Result<ReverseGeocodeResult> {
+        let amap = self
+            .amap
+            .as_ref()
+            .context("amap reverse geocoding is not configured")?;
+        let mut url = amap.endpoint.clone();
+        url.query_pairs_mut()
+            .append_pair("key", amap.key.as_str())
+            .append_pair("location", &format!("{longitude:.6},{latitude:.6}"))
+            .append_pair("extensions", "base")
+            .append_pair("output", "json");
+        let response = match self.client.get(url).send().await {
+            Ok(response) => response,
+            Err(error) => {
+                bail!(
+                    "amap reverse geocoding request failed ({})",
+                    reqwest_error_kind(&error)
+                );
+            }
+        };
+        let status = response.status();
+        if !status.is_success() {
+            bail!("amap reverse geocoding service returned an error ({status})");
+        }
+        let parsed = limited_response_json::<AmapResponse>(response).await?;
+        parsed.into_result()
+    }
+
+    async fn lookup_nominatim(
+        &self,
+        latitude: f64,
+        longitude: f64,
+    ) -> Result<ReverseGeocodeResult> {
+        let mut url = self.nominatim_endpoint.clone();
+        url.query_pairs_mut()
+            .append_pair("format", "jsonv2")
+            .append_pair("addressdetails", "1")
+            .append_pair("accept-language", "zh-CN,zh,en")
+            .append_pair("zoom", "14")
+            .append_pair("lat", &latitude.to_string())
+            .append_pair("lon", &longitude.to_string());
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .context("reverse geocoding request failed")?
+            .error_for_status()
+            .context("reverse geocoding service returned an error")?;
+        let response = limited_response_json::<NominatimResponse>(response).await?;
+        anyhow::ensure!(
+            response.error.as_deref().is_none_or(str::is_empty),
+            "reverse geocoding service rejected the coordinates"
+        );
+        Ok(response.into_result())
     }
 
     async fn cache(&self, key: CoordinateKey, value: ReverseGeocodeResult) {
@@ -221,7 +324,7 @@ impl EnabledGeocoder {
     }
 }
 
-async fn limited_response_json(mut response: reqwest::Response) -> Result<NominatimResponse> {
+async fn limited_response_json<T: DeserializeOwned>(mut response: reqwest::Response) -> Result<T> {
     if response
         .content_length()
         .is_some_and(|length| length > MAX_RESPONSE_BYTES as u64)
@@ -258,20 +361,81 @@ impl CoordinateKey {
     }
 }
 
-impl NominatimAddress {
+impl NominatimResponse {
     fn into_result(self) -> ReverseGeocodeResult {
+        self.address.into_result(self.display_name.as_deref())
+    }
+}
+
+impl NominatimAddress {
+    fn into_result(self, display_name: Option<&str>) -> ReverseGeocodeResult {
+        let province = first_non_empty([self.state, self.province, self.region]);
+        let mut city = first_non_empty([self.city, self.town, self.municipality]);
+        let mut district = first_non_empty([
+            self.city_district,
+            self.district,
+            self.borough,
+            self.suburb,
+            self.county,
+        ]);
+        if looks_like_chinese_district(&city) {
+            if district.is_empty() || looks_like_chinese_subdistrict(&district) {
+                district = city.clone();
+            }
+            if let Some(prefecture) = chinese_prefecture_from_display_name(display_name) {
+                city = prefecture;
+            }
+        }
         ReverseGeocodeResult {
-            province: first_non_empty([self.state, self.province, self.region]),
-            city: first_non_empty([self.city, self.town, self.municipality]),
-            district: first_non_empty([
-                self.city_district,
-                self.district,
-                self.borough,
-                self.suburb,
-                self.county,
-            ]),
+            province,
+            city,
+            district,
         }
     }
+}
+
+impl AmapResponse {
+    fn into_result(self) -> Result<ReverseGeocodeResult> {
+        anyhow::ensure!(
+            self.status == "1",
+            "amap reverse geocoding rejected the coordinates"
+        );
+        let component = self
+            .regeocode
+            .and_then(|regeocode| regeocode.address_component)
+            .unwrap_or_default();
+        let province = component.province.trim().to_string();
+        let mut city = component.city.trim().to_string();
+        let district = component.district.trim().to_string();
+        if city.is_empty() {
+            city = province.clone();
+        }
+        anyhow::ensure!(
+            !(province.is_empty() && city.is_empty() && district.is_empty()),
+            "amap reverse geocoding returned an empty address"
+        );
+        Ok(ReverseGeocodeResult {
+            province,
+            city,
+            district,
+        })
+    }
+}
+
+fn looks_like_chinese_district(value: &str) -> bool {
+    value.ends_with('区') || value.ends_with('县') || value.ends_with('旗')
+}
+
+fn looks_like_chinese_subdistrict(value: &str) -> bool {
+    value.ends_with("街道") || value.ends_with('镇') || value.ends_with('乡')
+}
+
+fn chinese_prefecture_from_display_name(display_name: Option<&str>) -> Option<String> {
+    display_name?
+        .split([',', '，'])
+        .map(str::trim)
+        .find(|part| part.ends_with('市') && !part.ends_with('区') && part.chars().count() >= 2)
+        .map(ToOwned::to_owned)
 }
 
 fn first_non_empty<const N: usize>(values: [Option<String>; N]) -> String {
@@ -281,6 +445,33 @@ fn first_non_empty<const N: usize>(values: [Option<String>; N]) -> String {
         .map(|value| value.trim().to_string())
         .find(|value| !value.is_empty())
         .unwrap_or_default()
+}
+
+fn reqwest_error_kind(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_request() {
+        "request"
+    } else {
+        "transport"
+    }
+}
+
+fn deserialize_amap_text<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(String::new()),
+        Some(serde_json::Value::String(text)) => Ok(text),
+        Some(serde_json::Value::Array(items)) if items.is_empty() => Ok(String::new()),
+        Some(other) => Err(serde::de::Error::custom(format!(
+            "expected Amap string or empty array, got {other}"
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -297,9 +488,21 @@ mod tests {
     use tokio::sync::Mutex;
     use url::Url;
 
+    fn nominatim_only(
+        enabled: bool,
+        reverse_geocoding_url: &str,
+    ) -> anyhow::Result<ReverseGeocoder> {
+        ReverseGeocoder::from_settings(
+            enabled,
+            reverse_geocoding_url,
+            "http://127.0.0.1:9/regeo",
+            None,
+        )
+    }
+
     #[test]
     fn disabled_geocoder_does_not_parse_its_endpoint() -> anyhow::Result<()> {
-        let geocoder = ReverseGeocoder::from_settings(false, "not a URL")?;
+        let geocoder = nominatim_only(false, "not a URL")?;
         anyhow::ensure!(geocoder.enabled.is_none());
         Ok(())
     }
@@ -319,7 +522,7 @@ mod tests {
             borough: None,
             suburb: None,
         }
-        .into_result();
+        .into_result(None);
         anyhow::ensure!(result.province == "四川省");
         anyhow::ensure!(result.city == "成都市");
         anyhow::ensure!(result.district == "武侯区");
@@ -333,9 +536,26 @@ mod tests {
             county: Some("余杭区".to_string()),
             ..NominatimAddress::default()
         }
-        .into_result();
+        .into_result(None);
         anyhow::ensure!(result.city == "杭州市");
         anyhow::ensure!(result.district == "余杭区");
+        Ok(())
+    }
+
+    #[test]
+    fn chinese_district_in_city_uses_display_name_prefecture() -> anyhow::Result<()> {
+        let result = NominatimAddress {
+            state: Some("四川省".to_string()),
+            city: Some("锦江区".to_string()),
+            suburb: Some("沙河街道".to_string()),
+            ..NominatimAddress::default()
+        }
+        .into_result(Some(
+            "静康社区, 沙河街道, 锦江区, 成都市, 四川省, 610066, 中国",
+        ));
+        anyhow::ensure!(result.province == "四川省");
+        anyhow::ensure!(result.city == "成都市");
+        anyhow::ensure!(result.district == "锦江区");
         Ok(())
     }
 
@@ -351,16 +571,17 @@ mod tests {
     #[tokio::test]
     async fn rate_limit_wait_does_not_hold_the_state_lock() -> anyhow::Result<()> {
         let state = Arc::new(Mutex::new(GeocoderState {
-            last_request: Some(Instant::now()),
+            last_nominatim_request: Some(Instant::now()),
             ..GeocoderState::default()
         }));
         let geocoder = EnabledGeocoder {
-            endpoint: Url::parse("http://127.0.0.1:9/reverse")?,
+            nominatim_endpoint: Url::parse("http://127.0.0.1:9/reverse")?,
+            amap: None,
             client: reqwest::Client::new(),
             state: Arc::clone(&state),
             coordinate_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         };
-        let task = tokio::spawn(async move { geocoder.acquire_request_slot().await });
+        let task = tokio::spawn(async move { geocoder.acquire_nominatim_slot().await });
         tokio::task::yield_now().await;
 
         let guard = tokio::time::timeout(Duration::from_millis(100), state.lock()).await?;
@@ -388,7 +609,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = format!("http://{}/reverse", listener.local_addr()?);
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
-        let geocoder = ReverseGeocoder::from_settings(true, &endpoint)?;
+        let geocoder = nominatim_only(true, &endpoint)?;
 
         anyhow::ensure!(geocoder.resolve(35.0, 105.0).await.is_err());
         let enabled = geocoder
@@ -422,7 +643,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let endpoint = format!("http://{}/reverse", listener.local_addr()?);
         let server = tokio::spawn(async move { axum::serve(listener, app).await });
-        let geocoder = ReverseGeocoder::from_settings(true, &endpoint)?;
+        let geocoder = nominatim_only(true, &endpoint)?;
         let first = geocoder.resolve(30.6, 104.0);
         let second = geocoder.resolve(30.6, 104.0);
 
@@ -440,7 +661,8 @@ mod tests {
     #[test]
     fn coordinate_lock_table_removes_expired_entries() -> anyhow::Result<()> {
         let geocoder = EnabledGeocoder {
-            endpoint: Url::parse("http://127.0.0.1:9/reverse")?,
+            nominatim_endpoint: Url::parse("http://127.0.0.1:9/reverse")?,
+            amap: None,
             client: reqwest::Client::new(),
             state: Arc::new(Mutex::new(GeocoderState::default())),
             coordinate_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
@@ -454,6 +676,220 @@ mod tests {
         anyhow::ensure!(locks.len() == 1);
         drop(locks);
         drop(active);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn amap_success_skips_nominatim() -> anyhow::Result<()> {
+        let amap_calls = Arc::new(AtomicUsize::new(0));
+        let nominatim_calls = Arc::new(AtomicUsize::new(0));
+        let amap_server_calls = Arc::clone(&amap_calls);
+        let nominatim_server_calls = Arc::clone(&nominatim_calls);
+        let app = axum::Router::new()
+            .route(
+                "/regeo",
+                axum::routing::get(move || {
+                    let calls = Arc::clone(&amap_server_calls);
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({
+                            "status": "1",
+                            "regeocode": {
+                                "addressComponent": {
+                                    "province": "四川省",
+                                    "city": "成都市",
+                                    "district": "锦江区"
+                                }
+                            }
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/reverse",
+                axum::routing::get(move || {
+                    let calls = Arc::clone(&nominatim_server_calls);
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({"error": "should not be called"}))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let geocoder = ReverseGeocoder::from_settings(
+            true,
+            &format!("http://{addr}/reverse"),
+            &format!("http://{addr}/regeo"),
+            Some("test-key"),
+        )?;
+
+        let result = geocoder.resolve(30.6376, 104.1119).await?;
+        anyhow::ensure!(result.province == "四川省");
+        anyhow::ensure!(result.city == "成都市");
+        anyhow::ensure!(result.district == "锦江区");
+        anyhow::ensure!(amap_calls.load(Ordering::SeqCst) == 1);
+        anyhow::ensure!(nominatim_calls.load(Ordering::SeqCst) == 0);
+        server.abort();
+        drop(server.await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn amap_empty_city_array_uses_province() -> anyhow::Result<()> {
+        let app = axum::Router::new().route(
+            "/regeo",
+            axum::routing::get(|| async {
+                axum::Json(serde_json::json!({
+                    "status": "1",
+                    "regeocode": {
+                        "addressComponent": {
+                            "province": "北京市",
+                            "city": [],
+                            "district": "朝阳区"
+                        }
+                    }
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let geocoder = ReverseGeocoder::from_settings(
+            true,
+            "http://127.0.0.1:9/reverse",
+            &format!("http://{addr}/regeo"),
+            Some("test-key"),
+        )?;
+
+        let result = geocoder.resolve(39.99, 116.48).await?;
+        anyhow::ensure!(result.province == "北京市");
+        anyhow::ensure!(result.city == "北京市");
+        anyhow::ensure!(result.district == "朝阳区");
+        server.abort();
+        drop(server.await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn amap_failure_falls_back_to_nominatim() -> anyhow::Result<()> {
+        let nominatim_calls = Arc::new(AtomicUsize::new(0));
+        let nominatim_server_calls = Arc::clone(&nominatim_calls);
+        let app = axum::Router::new()
+            .route(
+                "/regeo",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!({
+                        "status": "0",
+                        "info": "INVALID_USER_KEY"
+                    }))
+                }),
+            )
+            .route(
+                "/reverse",
+                axum::routing::get(move || {
+                    let calls = Arc::clone(&nominatim_server_calls);
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({
+                            "display_name": "静康社区, 沙河街道, 锦江区, 成都市, 四川省",
+                            "address": {
+                                "state": "四川省",
+                                "city": "锦江区",
+                                "suburb": "沙河街道"
+                            }
+                        }))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let geocoder = ReverseGeocoder::from_settings(
+            true,
+            &format!("http://{addr}/reverse"),
+            &format!("http://{addr}/regeo"),
+            Some("test-key"),
+        )?;
+
+        let result = geocoder.resolve(30.6376, 104.1119).await?;
+        anyhow::ensure!(result.province == "四川省");
+        anyhow::ensure!(result.city == "成都市");
+        anyhow::ensure!(result.district == "锦江区");
+        anyhow::ensure!(nominatim_calls.load(Ordering::SeqCst) == 1);
+        server.abort();
+        drop(server.await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn both_providers_failing_is_an_error() -> anyhow::Result<()> {
+        let app = axum::Router::new()
+            .route(
+                "/regeo",
+                axum::routing::get(|| async { axum::http::StatusCode::INTERNAL_SERVER_ERROR }),
+            )
+            .route(
+                "/reverse",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!({"error": "unable to geocode"}))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let geocoder = ReverseGeocoder::from_settings(
+            true,
+            &format!("http://{addr}/reverse"),
+            &format!("http://{addr}/regeo"),
+            Some("test-key"),
+        )?;
+
+        anyhow::ensure!(geocoder.resolve(30.6376, 104.1119).await.is_err());
+        server.abort();
+        drop(server.await);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_amap_key_uses_only_nominatim() -> anyhow::Result<()> {
+        let amap_calls = Arc::new(AtomicUsize::new(0));
+        let amap_server_calls = Arc::clone(&amap_calls);
+        let app = axum::Router::new()
+            .route(
+                "/regeo",
+                axum::routing::get(move || {
+                    let calls = Arc::clone(&amap_server_calls);
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        axum::Json(serde_json::json!({"status": "1"}))
+                    }
+                }),
+            )
+            .route(
+                "/reverse",
+                axum::routing::get(|| async {
+                    axum::Json(serde_json::json!({
+                        "address": {"state": "浙江省", "city": "杭州市", "county": "余杭区"}
+                    }))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let geocoder = ReverseGeocoder::from_settings(
+            true,
+            &format!("http://{addr}/reverse"),
+            &format!("http://{addr}/regeo"),
+            None,
+        )?;
+
+        let result = geocoder.resolve(30.3, 120.0).await?;
+        anyhow::ensure!(result.city == "杭州市");
+        anyhow::ensure!(amap_calls.load(Ordering::SeqCst) == 0);
+        server.abort();
+        drop(server.await);
         Ok(())
     }
 }
