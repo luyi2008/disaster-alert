@@ -278,6 +278,19 @@ impl EnabledGeocoder {
             bail!("amap reverse geocoding service returned an error ({status})");
         }
         let parsed = limited_response_json::<AmapResponse>(response).await?;
+        // #region agent log
+        agent_debug_log(
+            "F",
+            "reverse_geocoder.rs:lookup_amap",
+            "amap json status",
+            serde_json::json!({
+                "status": parsed.status,
+                "info": parsed.info,
+                "infocode": parsed.infocode,
+                "has_regeocode": parsed.regeocode.is_some(),
+            }),
+        );
+        // #endregion
         parsed.into_result()
     }
 
@@ -482,6 +495,35 @@ where
         ))),
     }
 }
+
+// #region agent log
+fn agent_debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/Users/jon/Mangguo/disaster-alert/.cursor/debug-c37bf2.log")
+    else {
+        return;
+    };
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let payload = serde_json::json!({
+        "sessionId": "c37bf2",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": timestamp,
+        "runId": "amap-status",
+    });
+    match std::io::Write::write_all(&mut file, format!("{payload}\n").as_bytes()) {
+        Ok(()) => {}
+        Err(_) => {}
+    }
+}
+// #endregion
 
 #[cfg(test)]
 mod tests {
