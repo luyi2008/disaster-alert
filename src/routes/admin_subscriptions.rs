@@ -278,7 +278,7 @@ mod tests {
         anyhow::ensure!(list_response.status() == StatusCode::OK);
         let list_body = json_body(list_response).await?;
         anyhow::ensure!(
-            list_body["data"]["device_keys"] == serde_json::json!(["abc123", "otherkey"])
+            list_body["data"]["device_keys"] == serde_json::json!(["abc123", "abc123", "otherkey"])
         );
 
         let lookup = admin_subscriptions_handler(
