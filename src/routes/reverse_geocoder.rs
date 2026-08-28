@@ -83,7 +83,12 @@ struct NominatimAddress {
 
 #[derive(Deserialize)]
 struct AmapResponse {
+    #[serde(deserialize_with = "deserialize_amap_text")]
     status: String,
+    #[serde(default, deserialize_with = "deserialize_amap_text")]
+    info: String,
+    #[serde(default, deserialize_with = "deserialize_amap_text")]
+    infocode: String,
     regeocode: Option<AmapRegeocode>,
 }
 
@@ -273,6 +278,19 @@ impl EnabledGeocoder {
             bail!("amap reverse geocoding service returned an error ({status})");
         }
         let parsed = limited_response_json::<AmapResponse>(response).await?;
+        // #region agent log
+        agent_debug_log(
+            "F",
+            "reverse_geocoder.rs:lookup_amap",
+            "amap json status",
+            serde_json::json!({
+                "status": parsed.status,
+                "info": parsed.info,
+                "infocode": parsed.infocode,
+                "has_regeocode": parsed.regeocode.is_some(),
+            }),
+        );
+        // #endregion
         parsed.into_result()
     }
 
@@ -398,7 +416,10 @@ impl AmapResponse {
     fn into_result(self) -> Result<ReverseGeocodeResult> {
         anyhow::ensure!(
             self.status == "1",
-            "amap reverse geocoding rejected the coordinates"
+            "amap reverse geocoding rejected the coordinates (status={} info={} infocode={})",
+            self.status,
+            self.info,
+            self.infocode
         );
         let component = self
             .regeocode
@@ -467,18 +488,48 @@ where
     match value {
         None | Some(serde_json::Value::Null) => Ok(String::new()),
         Some(serde_json::Value::String(text)) => Ok(text),
+        Some(serde_json::Value::Number(number)) => Ok(number.to_string()),
         Some(serde_json::Value::Array(items)) if items.is_empty() => Ok(String::new()),
         Some(other) => Err(serde::de::Error::custom(format!(
-            "expected Amap string or empty array, got {other}"
+            "expected Amap string, number, or empty array, got {other}"
         ))),
     }
 }
 
+// #region agent log
+fn agent_debug_log(hypothesis_id: &str, location: &str, message: &str, data: serde_json::Value) {
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/Users/jon/Mangguo/disaster-alert/.cursor/debug-c37bf2.log")
+    else {
+        return;
+    };
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let payload = serde_json::json!({
+        "sessionId": "c37bf2",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": timestamp,
+        "runId": "amap-status",
+    });
+    match std::io::Write::write_all(&mut file, format!("{payload}\n").as_bytes()) {
+        Ok(()) => {}
+        Err(_) => {}
+    }
+}
+// #endregion
+
 #[cfg(test)]
 mod tests {
     use super::{
-        CoordinateKey, EnabledGeocoder, GeocoderState, MIN_REQUEST_INTERVAL, NominatimAddress,
-        ReverseGeocoder,
+        AmapResponse, CoordinateKey, EnabledGeocoder, GeocoderState, MIN_REQUEST_INTERVAL,
+        NominatimAddress, ReverseGeocoder,
     };
     use std::sync::{
         Arc,
@@ -498,6 +549,24 @@ mod tests {
             "http://127.0.0.1:9/regeo",
             None,
         )
+    }
+
+    #[test]
+    fn amap_rejection_includes_infocode() -> anyhow::Result<()> {
+        let parsed: AmapResponse = serde_json::from_value(serde_json::json!({
+            "status": "0",
+            "info": "INVALID_USER_IP",
+            "infocode": "10005"
+        }))?;
+        let error = parsed
+            .into_result()
+            .err()
+            .ok_or_else(|| anyhow::anyhow!("expected Amap rejection"))?;
+        let message = error.to_string();
+        anyhow::ensure!(message.contains("status=0"));
+        anyhow::ensure!(message.contains("INVALID_USER_IP"));
+        anyhow::ensure!(message.contains("10005"));
+        Ok(())
     }
 
     #[test]
