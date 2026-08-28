@@ -233,7 +233,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 - 不要提交真实 `.env`、数据库、Bark Key、高德 Key 或签名私钥
 - 不要在日志、截图、Issue 或测试数据中使用真实 Bark Key、用户位置或通知详情 URL
 - 修改 `ALERT_SIGNING_KEY` 后，之前发送的详情链接会失效
-- 统计接口只返回聚合数量，系统不提供通过 Bark Key 查询订阅内容的接口
+- 统计接口只返回聚合数量
 
 ## 使用与部署责任
 

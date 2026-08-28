@@ -7,6 +7,7 @@ use url::Url;
 
 const MAX_LOG_BODY_CHARS: usize = 2_048;
 const SENSITIVE_QUERY_KEYS: &[&str] = &["key", "apikey", "token", "access_token"];
+const DEVICE_KEY_QUERY: &str = "device_key";
 const NOTIFICATION_PATH_MARKER: &str = "/notifications/";
 
 #[derive(Clone, Copy)]
@@ -28,7 +29,9 @@ pub(crate) fn redact_url(url: &Url) -> String {
     let pairs = redacted
         .query_pairs()
         .map(|(key, value)| {
-            if is_sensitive_query_key(&key) {
+            if key.eq_ignore_ascii_case(DEVICE_KEY_QUERY) {
+                (key.into_owned(), mask_middle(&value))
+            } else if is_sensitive_query_key(&key) {
                 (key.into_owned(), "***".to_string())
             } else {
                 (key.into_owned(), value.into_owned())
@@ -350,6 +353,17 @@ mod tests {
         let redacted = redact_http_uri(&uri);
         anyhow::ensure!(redacted.contains("/api/incidents/evt-1/notifications/abc***ken"));
         anyhow::ensure!(!redacted.contains("abcdefg.signaturetoken"));
+        Ok(())
+    }
+
+    #[test]
+    fn masks_device_key_query_in_relative_uri() -> anyhow::Result<()> {
+        let uri: Uri = "/api/admin/subscriptions?device_key=barkdevicekey"
+            .parse()
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let redacted = redact_http_uri(&uri);
+        anyhow::ensure!(redacted.contains("device_key=bar***key"));
+        anyhow::ensure!(!redacted.contains("barkdevicekey"));
         Ok(())
     }
 

@@ -730,6 +730,31 @@ impl FjallStorage {
         Ok(count)
     }
 
+    pub(crate) fn list_active_device_keys(&self) -> Result<Vec<String>> {
+        let mut keys = std::collections::BTreeSet::new();
+        for item in self.subscriptions.iter() {
+            let record: StoredSubscription = decode(&item.value()?)?;
+            if record.active {
+                keys.insert(record.subscription.device_key().to_string());
+            }
+        }
+        Ok(keys.into_iter().collect())
+    }
+
+    pub(crate) fn active_subscriptions_by_device_key(
+        &self,
+        device_key: &str,
+    ) -> Result<Vec<Subscription>> {
+        let mut subscriptions = Vec::new();
+        for item in self.subscriptions.iter() {
+            let record: StoredSubscription = decode(&item.value()?)?;
+            if record.active && record.subscription.device_key() == device_key {
+                subscriptions.push(record.subscription);
+            }
+        }
+        Ok(subscriptions)
+    }
+
     #[cfg(feature = "benchmarks")]
     pub(crate) fn import_subscription_batch(
         &self,
@@ -2202,6 +2227,45 @@ mod tests {
             .context("missing subscription tombstone")?;
         anyhow::ensure!(!inactive.active);
         anyhow::ensure!(inactive.generation > compiled.generation);
+        Ok(())
+    }
+
+    #[test]
+    fn active_device_key_listing_skips_inactive_and_deduplicates() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        storage.store_subscription(subscription())?;
+        let mut other = subscription();
+        other.destination = NotificationDestination::Bark {
+            base_url: "https://api.day.app".to_string(),
+            device_key: "device2".to_string(),
+        };
+        storage.store_subscription(other)?;
+        let mut same_key_other_url = subscription();
+        same_key_other_url.destination = NotificationDestination::Bark {
+            base_url: "https://bark.example.com".to_string(),
+            device_key: "device1".to_string(),
+        };
+        storage.store_subscription(same_key_other_url)?;
+        let first = storage
+            .stored_subscription_by_destination(&crate::models::DestinationId {
+                base_url: "https://api.day.app".to_string(),
+                device_key: "device1".to_string(),
+            })?
+            .context("missing first subscription")?;
+        storage.deactivate_subscription(first.id)?;
+
+        anyhow::ensure!(
+            storage.list_active_device_keys()? == ["device1".to_string(), "device2".to_string()]
+        );
+        let by_device1 = storage.active_subscriptions_by_device_key("device1")?;
+        anyhow::ensure!(by_device1.len() == 1);
+        anyhow::ensure!(by_device1[0].bark_base_url() == "https://bark.example.com");
+        anyhow::ensure!(
+            storage
+                .active_subscriptions_by_device_key("missing")?
+                .is_empty()
+        );
         Ok(())
     }
 
