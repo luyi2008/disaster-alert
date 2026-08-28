@@ -21,6 +21,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const SUBSCRIPTION_BODY_LIMIT_BYTES: usize = 32 * 1024;
@@ -163,6 +165,12 @@ async fn run() -> Result<()> {
         .route("/api/status", get(status_handler))
         .layer(cors)
         .layer(CompressionLayer::new())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(crate::utils::outbound_log::RedactingMakeSpan)
+                .on_request(DefaultOnRequest::new().level(Level::INFO))
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state);
 
     let addr: SocketAddr = format!("{}:{}", config.server_host, config.server_port)
