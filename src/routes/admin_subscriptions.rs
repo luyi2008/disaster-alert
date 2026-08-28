@@ -157,7 +157,7 @@ fn parse_admin_subscription_query(
     query: Result<Query<AdminSubscriptionQuery>, QueryRejection>,
 ) -> Result<String, (StatusCode, String)> {
     let Query(query) =
-        query.map_err(|_| (StatusCode::BAD_REQUEST, "Bark Key 不能为空".to_string()))?;
+        query.map_err(|_rejection| (StatusCode::BAD_REQUEST, "Bark Key 不能为空".to_string()))?;
     validate_device_key(&query.device_key)
 }
 
