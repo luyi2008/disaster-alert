@@ -328,7 +328,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: 当前 Key 没有订阅，或历史目录中找不到该 key
+          description: 当前 Key 没有已激活或待确认订阅，或历史目录中找不到该 key
           content:
             application/json:
               schema:
