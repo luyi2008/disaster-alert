@@ -5,7 +5,7 @@ use crate::models::{
     MonitoringTarget, SourceSelection,
 };
 use crate::storage::{FjallStorage, Storage, try_now_millis};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -75,7 +75,7 @@ struct NotificationContextStorage {
 #[derive(Serialize, Deserialize)]
 struct StoredContext {
     stored_at_ms: i64,
-    snapshot: NotificationSnapshot,
+    snapshot: Box<serde_json::value::RawValue>,
 }
 
 impl NotificationContextStorage {
@@ -85,47 +85,50 @@ impl NotificationContextStorage {
 
     fn prepare(&self, snapshot: &NotificationSnapshot) -> Result<(String, Vec<u8>)> {
         let snapshot_bytes = serde_json::to_vec(snapshot)?;
-        let mut hash = sha2::Sha256::new();
-        use sha2::Digest as _;
-        hash.update(b"disaster-alert:notification-context-id:v1\0");
-        hash.update(&snapshot_bytes);
-        let id = URL_SAFE_NO_PAD.encode(&hash.finalize()[..16]);
+        let id = context_id_from_bytes(&snapshot_bytes);
         let stored = StoredContext {
             stored_at_ms: try_now_millis()?,
-            snapshot: snapshot.clone(),
+            snapshot: serde_json::value::RawValue::from_string(
+                String::from_utf8(snapshot_bytes).context("snapshot JSON must be UTF-8")?,
+            )?,
         };
         Ok((id, serde_json::to_vec(&stored)?))
     }
 
     fn put_prepared(&self, context: &PreparedNotificationContext) -> Result<()> {
         self.storage
-            .put_context(&context.context_id, context.encoded_value.clone())
+            .put_context(&context.context_id, context.encoded_value.clone())?;
+        self.storage.persist()
     }
 
-    fn get(&self, id: &str) -> Result<Option<NotificationSnapshot>> {
-        anyhow::ensure!(
-            id.len() == 22
-                && id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')),
-            "invalid notification context ID"
-        );
-        let snapshot = self
-            .storage
-            .context(id)?
-            .map(|value| {
-                serde_json::from_slice::<StoredContext>(&value)
-                    .map(|stored| stored.snapshot)
-                    .context("invalid notification context")
-            })
-            .transpose()?;
-        if let Some(snapshot) = &snapshot {
-            anyhow::ensure!(
-                context_id(snapshot)? == id,
-                "notification context key does not match its snapshot"
-            );
+    fn get(
+        &self,
+        id: &str,
+    ) -> std::result::Result<Option<NotificationSnapshot>, NotificationVerifyError> {
+        if !is_context_id(id) {
+            return Err(NotificationVerifyError::Invalid(anyhow!(
+                "invalid notification context ID"
+            )));
         }
-        Ok(snapshot)
+        let Some(value) = self
+            .storage
+            .context(id)
+            .map_err(NotificationVerifyError::Storage)?
+        else {
+            return Ok(None);
+        };
+        let stored: StoredContext = serde_json::from_slice(&value)
+            .context("invalid notification context")
+            .map_err(NotificationVerifyError::Invalid)?;
+        if context_id_from_bytes(stored.snapshot.get().as_bytes()) != id {
+            return Err(NotificationVerifyError::Invalid(anyhow!(
+                "notification context key does not match its snapshot"
+            )));
+        }
+        serde_json::from_str(stored.snapshot.get())
+            .context("invalid notification context")
+            .map(Some)
+            .map_err(NotificationVerifyError::Invalid)
     }
 
     fn prune(&self, cutoff_ms: i64) -> Result<usize> {
@@ -451,15 +454,10 @@ impl NotificationLinkService {
             Ok(context_id)
         })()
         .map_err(NotificationVerifyError::Invalid)?;
-        let snapshot = self
-            .inner
-            .context_storage
-            .get(context_id)
-            .map_err(NotificationVerifyError::Storage)?
-            .ok_or_else(|| {
-                NotificationVerifyError::Invalid(anyhow::anyhow!("notification context not found"))
-            })?;
-        validate_snapshot(&snapshot).map_err(NotificationVerifyError::Storage)?;
+        let snapshot = self.inner.context_storage.get(context_id)?.ok_or_else(|| {
+            NotificationVerifyError::Invalid(anyhow::anyhow!("notification context not found"))
+        })?;
+        validate_snapshot(&snapshot).map_err(NotificationVerifyError::Invalid)?;
         if &snapshot.incident_id != incident_id {
             return Err(NotificationVerifyError::Invalid(anyhow::anyhow!(
                 "notification token does not belong to this incident"
@@ -469,13 +467,23 @@ impl NotificationLinkService {
     }
 }
 
-fn context_id(snapshot: &NotificationSnapshot) -> Result<String> {
-    let snapshot_bytes = serde_json::to_vec(snapshot)?;
+fn is_context_id(id: &str) -> bool {
+    id.len() == 22
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+fn context_id_from_bytes(snapshot_bytes: &[u8]) -> String {
     let mut hash = sha2::Sha256::new();
     use sha2::Digest as _;
     hash.update(b"disaster-alert:notification-context-id:v1\0");
     hash.update(snapshot_bytes);
-    Ok(URL_SAFE_NO_PAD.encode(&hash.finalize()[..16]))
+    URL_SAFE_NO_PAD.encode(&hash.finalize()[..16])
+}
+
+fn context_id(snapshot: &NotificationSnapshot) -> Result<String> {
+    Ok(context_id_from_bytes(&serde_json::to_vec(snapshot)?))
 }
 
 impl NotificationEventSnapshot {
@@ -801,7 +809,11 @@ fn decode_secret_array<const N: usize>(value: &str, name: &str) -> Result<Zeroiz
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AdministrativeRegion, GeoPoint, ProviderChannel, SourceSelection};
+    use crate::models::{
+        AdministrativeRegion, GeoPoint, InterruptionLevel, NotificationDestination,
+        ProviderChannel, SourceSelection, Subscription,
+    };
+    use crate::simulate::{alert_timing, simulated_event};
 
     struct TestService {
         service: NotificationLinkService,
@@ -929,6 +941,52 @@ mod tests {
     }
 
     #[test]
+    fn simulated_event_with_computed_timing_round_trips() -> Result<()> {
+        let service = service([21; 32])?.service;
+        let subscription = Subscription::new(
+            NotificationDestination::Bark {
+                base_url: "https://api.day.app".to_string(),
+                device_key: "abc123".to_string(),
+            },
+            vec![MonitoringTarget {
+                label: "成都锦江".to_string(),
+                point: GeoPoint {
+                    latitude: 30.5954,
+                    longitude: 104.0982,
+                },
+                region: Default::default(),
+            }],
+            vec![AlertRule::default_for(DisasterCategory::EarthquakeWarning)],
+        );
+        let event = simulated_event(
+            &subscription,
+            InterruptionLevel::Active,
+            "SIM-20260829122100",
+            "2026-08-29T12:21:00Z",
+        )
+        .context("simulated event")?;
+        let target = subscription.targets.first().context("target")?;
+        let timing = alert_timing(&event, target, 6.0, 3.5, 1_788_017_584_000);
+        let incident = IncidentId::derive(&event.event_key());
+        let url = service.create_url_for(NotificationContextInput {
+            incident_id: &incident,
+            event: &event,
+            target,
+            timing: timing.as_ref(),
+            interruption_level: InterruptionLevel::Active.as_str(),
+            matched_rule: subscription
+                .alert(DisasterCategory::EarthquakeWarning)
+                .context("rule")?,
+            issued_at_ms: 1_788_017_584_000,
+        })?;
+        let snapshot = service.verify(&incident, token(&url))?;
+        anyhow::ensure!(snapshot.incident_id == incident);
+        anyhow::ensure!(snapshot.event.training);
+        anyhow::ensure!(snapshot.timing.is_some());
+        Ok(())
+    }
+
+    #[test]
     fn legacy_snapshot_without_radius_keeps_its_content_address() -> Result<()> {
         let incident = IncidentId::derive("legacy:event");
         let mut event = event();
@@ -1036,7 +1094,7 @@ mod tests {
 
         anyhow::ensure!(matches!(
             service.verify(&incident, &token),
-            Err(NotificationVerifyError::Storage(_))
+            Err(NotificationVerifyError::Invalid(_))
         ));
         Ok(())
     }

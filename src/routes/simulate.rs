@@ -365,7 +365,7 @@ mod tests {
         AlertRule, DisasterCategory, GeoPoint, MonitoringTarget, NotificationDestination,
         Subscription,
     };
-    use crate::routes::{AppState, ReverseGeocoder};
+    use crate::routes::{AppState, ReverseGeocoder, incident_detail_handler};
     use crate::runtime::RuntimeStatus;
     use crate::simulate::SimulateMode;
     use crate::storage::Storage;
@@ -373,7 +373,7 @@ mod tests {
     use anyhow::Context;
     use axum::{
         body::{Bytes, to_bytes},
-        extract::{Query, State},
+        extract::{Path, Query, State},
         http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION},
         response::IntoResponse,
     };
@@ -383,7 +383,7 @@ mod tests {
     struct Harness {
         state: AppState,
         bark_base_url: String,
-        captured: Arc<Mutex<Vec<String>>>,
+        captured: Arc<Mutex<Vec<Value>>>,
         _directory: tempfile::TempDir,
         _server: tokio::task::JoinHandle<Result<(), std::io::Error>>,
     }
@@ -413,20 +413,18 @@ mod tests {
 
     async fn start_harness() -> anyhow::Result<Harness> {
         async fn capture(
-            axum::extract::State(captured): axum::extract::State<Arc<Mutex<Vec<String>>>>,
+            axum::extract::State(captured): axum::extract::State<Arc<Mutex<Vec<Value>>>>,
             axum::Json(payload): axum::Json<Value>,
         ) -> axum::Json<Value> {
-            if let Ok(mut keys) = captured.lock()
-                && let Some(device_key) = payload.get("device_key").and_then(Value::as_str)
-            {
-                keys.push(device_key.to_string());
+            if let Ok(mut payloads) = captured.lock() {
+                payloads.push(payload.clone());
             }
             axum::Json(serde_json::json!({ "code": 200 }))
         }
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        let captured = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::new(Mutex::new(Vec::<Value>::new()));
         let app = axum::Router::new()
             .route("/push", axum::routing::post(capture))
             .with_state(captured.clone());
@@ -492,8 +490,30 @@ mod tests {
         harness
             .captured
             .lock()
-            .map(|keys| keys.clone())
+            .map(|payloads| {
+                payloads
+                    .iter()
+                    .filter_map(|payload| {
+                        payload
+                            .get("device_key")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    })
+                    .collect()
+            })
             .map_err(|error| anyhow::anyhow!("capture lock poisoned: {error}"))
+    }
+
+    fn captured_detail_url(harness: &Harness) -> anyhow::Result<String> {
+        let payloads = harness
+            .captured
+            .lock()
+            .map_err(|error| anyhow::anyhow!("capture lock poisoned: {error}"))?;
+        payloads
+            .last()
+            .and_then(|payload| payload.get("url").and_then(Value::as_str))
+            .map(str::to_string)
+            .context("Bark payload missing detail url")
     }
 
     #[test]
@@ -842,6 +862,49 @@ mod tests {
         let (status, body) = json_body(response).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(body["message"], "不支持的历史目录");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn simulate_push_detail_link_loads_snapshot_without_incident() -> anyhow::Result<()> {
+        let harness = start_harness().await?;
+        let response = simulate_handler(
+            State(harness.state.clone()),
+            bearer_headers("targetKey")?,
+            Ok(Query(SimulateQuery {
+                notify_level: Some("active".to_string()),
+                source: None,
+                key: None,
+            })),
+            Bytes::new(),
+        )
+        .await
+        .into_response();
+        let (status, body) = json_body(response).await?;
+        assert_eq!(status, StatusCode::OK, "body {body}");
+        assert_eq!(body["data"]["pushed"], 1);
+        let url = captured_detail_url(&harness)?;
+        let path = url
+            .rsplit_once("/incidents/")
+            .map(|(_, rest)| rest)
+            .context("incident path")?;
+        let (incident_id, token) = path.split_once("/notifications/").context("token path")?;
+        let detail = incident_detail_handler(
+            State(harness.state.clone()),
+            Path((incident_id.to_string(), token.to_string())),
+        )
+        .await;
+        assert_eq!(detail.status(), StatusCode::OK);
+        let detail_body = json_body(detail).await?.1;
+        assert_eq!(detail_body["success"], true);
+        assert!(
+            detail_body["data"]["snapshot"]["event"]["title"]
+                .as_str()
+                .is_some_and(|title| title.contains("模拟")),
+            "title {}",
+            detail_body["data"]["snapshot"]["event"]["title"]
+        );
+        assert!(detail_body["data"]["incident"].is_null());
         Ok(())
     }
 }
