@@ -748,7 +748,12 @@ impl FjallStorage {
         let mut subscriptions = Vec::new();
         for item in self.subscriptions.iter() {
             let record: StoredSubscription = decode(&item.value()?)?;
-            if record.active && record.subscription.device_key() == device_key {
+            if record.active
+                && record
+                    .subscription
+                    .device_key()
+                    .eq_ignore_ascii_case(device_key)
+            {
                 subscriptions.push(record.subscription);
             }
         }

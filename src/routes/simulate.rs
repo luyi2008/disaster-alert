@@ -124,7 +124,9 @@ pub(crate) async fn simulate_handler(
             Ok(subscriptions) if subscriptions.is_empty() => {
                 return (
                     StatusCode::NOT_FOUND,
-                    Json(ApiResponse::<SimulateData>::error("未找到订阅")),
+                    Json(ApiResponse::<SimulateData>::error(
+                        "未找到该 Bark Key 的已激活订阅，请先 POST /api/subscribe",
+                    )),
                 );
             }
             Ok(_) => {}
@@ -316,7 +318,7 @@ async fn lookup_subscriptions(
 ) -> anyhow::Result<Vec<Subscription>> {
     let manager = state.subscriptions.clone();
     let lookup_key = device_key.to_string();
-    tokio::task::spawn_blocking(move || manager.active_subscriptions_by_device_key(&lookup_key))
+    tokio::task::spawn_blocking(move || manager.simulate_subscriptions_by_device_key(&lookup_key))
         .await
         .map_err(anyhow::Error::from)?
 }
@@ -380,6 +382,7 @@ mod tests {
 
     struct Harness {
         state: AppState,
+        bark_base_url: String,
         captured: Arc<Mutex<Vec<String>>>,
         _directory: tempfile::TempDir,
         _server: tokio::task::JoinHandle<Result<(), std::io::Error>>,
@@ -463,6 +466,7 @@ mod tests {
             .upsert_subscription(subscription("otherKey", &base_url, 31.2304, 121.4737))?;
         Ok(Harness {
             state,
+            bark_base_url: base_url,
             captured,
             _directory: directory,
             _server: server,
@@ -550,6 +554,84 @@ mod tests {
             unsupported.err(),
             Some((StatusCode::BAD_REQUEST, "不支持的历史目录".to_string()))
         );
+    }
+
+    #[tokio::test]
+    async fn unknown_bearer_key_is_not_found() -> anyhow::Result<()> {
+        let harness = start_harness().await?;
+        let response = simulate_handler(
+            State(harness.state.clone()),
+            bearer_headers("unknownKey")?,
+            Ok(Query(SimulateQuery {
+                notify_level: Some("active".to_string()),
+                source: None,
+                key: None,
+            })),
+            Bytes::new(),
+        )
+        .await
+        .into_response();
+        let (status, body) = json_body(response).await?;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["success"], false);
+        assert!(
+            body["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("订阅")),
+            "message {}",
+            body["message"]
+        );
+        assert!(captured_keys(&harness)?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bearer_key_matches_stored_subscription_case_insensitively() -> anyhow::Result<()> {
+        let harness = start_harness().await?;
+        let response = simulate_handler(
+            State(harness.state.clone()),
+            bearer_headers("TARGETKEY")?,
+            Ok(Query(SimulateQuery {
+                notify_level: Some("active".to_string()),
+                source: None,
+                key: None,
+            })),
+            Bytes::new(),
+        )
+        .await
+        .into_response();
+        let (status, body) = json_body(response).await?;
+        assert_eq!(status, StatusCode::OK, "body {body}");
+        assert_eq!(body["data"]["pushed"], 1);
+        assert_eq!(captured_keys(&harness)?, vec!["targetKey".to_string()]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pending_confirmation_can_receive_simulate_push() -> anyhow::Result<()> {
+        let harness = start_harness().await?;
+        harness.state.subscriptions.begin_confirmation(
+            subscription("pendingKey", &harness.bark_base_url, 30.5954, 104.0982),
+            crate::storage::try_now_millis()?,
+            60_000,
+        )?;
+        let response = simulate_handler(
+            State(harness.state.clone()),
+            bearer_headers("pendingKey")?,
+            Ok(Query(SimulateQuery {
+                notify_level: Some("active".to_string()),
+                source: None,
+                key: None,
+            })),
+            Bytes::new(),
+        )
+        .await
+        .into_response();
+        let (status, body) = json_body(response).await?;
+        assert_eq!(status, StatusCode::OK, "body {body}");
+        assert_eq!(body["data"]["pushed"], 1);
+        assert_eq!(captured_keys(&harness)?, vec!["pendingKey".to_string()]);
+        Ok(())
     }
 
     #[tokio::test]
