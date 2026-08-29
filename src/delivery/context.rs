@@ -482,6 +482,7 @@ fn context_id_from_bytes(snapshot_bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(&hash.finalize()[..16])
 }
 
+#[cfg(test)]
 fn context_id(snapshot: &NotificationSnapshot) -> Result<String> {
     Ok(context_id_from_bytes(&serde_json::to_vec(snapshot)?))
 }
