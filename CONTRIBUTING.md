@@ -106,7 +106,7 @@ docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 这个项目会保存 Bark Key、监测地点和通知级别，任何相关改动都要先确认下面几条约束：
 
 - 用户面只允许通过 `POST /api/subscribe` 创建或覆盖订阅，通过 `DELETE /api/unsubscribe` 删除订阅
-- `POST /api/simulate` 与 `GET /api/history` 是旁路测试口：只对 Bearer 或 `device_ID_list` 中的已存订阅调用 Bark，**不**进入 `EventRuntime` / inbox / 匹配 / 投递账本，也**不**对全站扇出。不要求 `INSTANCE_TERMS_ACCEPTED`。真实 Bark Key 不得写入测试、文档或提交
+- `POST /api/simulate` 与 `GET /api/history` 是旁路测试口：只对 Bearer 或 `device_ID_list` 中的已存订阅调用 Bark，**不**进入 `EventRuntime` / inbox / 匹配 / 投递账本，也**不**对全站扇出。不要求 `INSTANCE_TERMS_ACCEPTED`。真实 Bark Key 不得写入测试、文档或提交。架构与测试方法见 [docs/simulate.md](docs/simulate.md)
 - 另有未写入 README / OpenAPI 的运营只读接口：列出当前激活订阅的 Bark Key，以及按 Key 返回地点和规则。当前无鉴权，后续补上；不要把这些路径写进用户文档
 - 退订接口只返回操作结果，不回显订阅内容
 - 公开的统计接口只返回聚合数量，不返回 Bark Key、位置或通知规则
