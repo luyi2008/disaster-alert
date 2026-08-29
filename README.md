@@ -258,6 +258,8 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `GET` | `/api/reverse-geocode` | 根据坐标查询行政区 |
 | `GET` | `/api/incidents/{incident_id}/notifications/{token}` | 获取通知详情（需通知链接中的 token） |
 | `GET` | `/api/status` | 获取订阅总数、数据源、后台任务状态，以及实例是否已确认责任声明 |
+| `POST` | `/api/simulate` | 向指定 Bark Key 发送模拟或历史回放预警（旁路，不入直播 EEW 管道） |
+| `GET` | `/api/history` | 读取内置历史地震目录 |
 | `GET` | `/health` | 健康检查 |
 
 ## 开发
@@ -280,7 +282,7 @@ cargo check --all-targets
 cargo test --all-targets
 ```
 
-更多开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+模拟测试旁路的架构与测试方法见 [docs/simulate.md](docs/simulate.md)。更多开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 致谢
 

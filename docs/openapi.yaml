@@ -21,7 +21,7 @@ tags:
   - name: Operations
     description: 服务状态与健康检查
   - name: Testing
-    description: 旁路测试推送（不进入真实 EEW 入队）
+    description: 旁路测试推送（不进入真实 EEW 入队）。设计说明见 docs/simulate.md。
 paths:
   /api/subscribe:
     post:
@@ -274,6 +274,8 @@ paths:
         - `source=major` 且 `key=` 目录条目 id：回放内置历史大地震（震中/震级用目录，发震时刻视为现在）。第一版只支持 `major`。
 
         空 body 时目标为当前 `Authorization: Bearer` 这一把 Key。可选 JSON `device_ID_list` 只推列表中的 Key，不会额外广播给其他订阅者。
+
+        架构与测试方法见仓库 `docs/simulate.md`。
       security:
         - barkBearer: []
       parameters:
@@ -343,6 +345,7 @@ paths:
       description: |
         公开只读。第一版仅 `source=major`（宜宾高县 2026、汶川、唐山）。
         可选 `Authorization: Bearer` 时按该 Key 的已存监测点标注 `distance_km` 与 `estimated_intensity`。
+        架构与测试方法见仓库 `docs/simulate.md`。
       parameters:
         - name: source
           in: query
