@@ -66,7 +66,7 @@ docker compose ps
 docker compose logs -f disaster-alert
 ```
 
-默认日志级别是 `info`（含 warn/error）。过滤器为环境变量 `RUST_LOG`；未设置时等价于 `disaster_alert=info,tower_http=info`。入站请求由 `TraceLayer` 记录，出站 HTTP（高德、Nominatim、Bark、Huania）记录为 `outbound.http`。需要更详细或更安静时：
+默认日志级别是 `info`（含 warn/error）。过滤器为环境变量 `RUST_LOG`；未设置时等价于 `disaster_alert=info,tower_http=info`。入站请求由 `TraceLayer` 记录，低频出站 HTTP（高德、Nominatim、Bark）记录为 `outbound.http`。Huania 每秒轮询的 `outbound.http` 记 `debug`，默认不出现在控制台。需要更详细或更安静时：
 
 ```dotenv
 # RUST_LOG=disaster_alert=debug,tower_http=info
@@ -162,7 +162,7 @@ docker compose logs -f disaster-alert
 docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 ```
 
-`RUST_LOG` 控制 `tracing` 过滤器（进程环境优先于 `.env`）。生产未设置时默认 `info`：生命周期、订阅变更、入站 HTTP、出站 `outbound.http`、warn/error。心跳和确认完成等 `debug` 事件默认不输出。
+`RUST_LOG` 控制 `tracing` 过滤器（进程环境优先于 `.env`）。生产未设置时默认 `info`：生命周期、订阅变更、入站 HTTP、低频出站 `outbound.http`、warn/error。心跳、Huania 秒级轮询和确认完成等 `debug` 事件默认不输出。
 
 ## 配置
 

@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use axum::http::{Request, Uri};
 use std::time::Instant;
 use tower_http::trace::MakeSpan;
-use tracing::Span;
+use tracing::{Level, Span};
 use url::Url;
 
 const MAX_LOG_BODY_CHARS: usize = 2_048;
@@ -122,19 +122,34 @@ struct OutboundHttpLog<'a> {
 }
 
 impl OutboundHttpLog<'_> {
-    fn emit(self) {
-        tracing::info!(
-            event = "outbound.http",
-            target = self.target,
-            method = self.method,
-            url = self.url,
-            status = self.status,
-            elapsed_ms = self.elapsed_ms,
-            request_body = self.request_body,
-            response_body = self.response_body,
-            error = self.error,
-            "outbound.http"
-        );
+    fn emit(self, level: Level) {
+        if level == Level::DEBUG {
+            tracing::debug!(
+                event = "outbound.http",
+                target = self.target,
+                method = self.method,
+                url = self.url,
+                status = self.status,
+                elapsed_ms = self.elapsed_ms,
+                request_body = self.request_body,
+                response_body = self.response_body,
+                error = self.error,
+                "outbound.http"
+            );
+        } else {
+            tracing::info!(
+                event = "outbound.http",
+                target = self.target,
+                method = self.method,
+                url = self.url,
+                status = self.status,
+                elapsed_ms = self.elapsed_ms,
+                request_body = self.request_body,
+                response_body = self.response_body,
+                error = self.error,
+                "outbound.http"
+            );
+        }
     }
 }
 
@@ -146,6 +161,7 @@ struct PendingOutboundRequest<'a> {
     request_body: Option<&'a str>,
     max_bytes: usize,
     read_context: &'static str,
+    level: Level,
 }
 
 impl PendingOutboundRequest<'_> {
@@ -160,7 +176,7 @@ impl PendingOutboundRequest<'_> {
             response_body: None,
             error: Some(kind),
         }
-        .emit();
+        .emit(self.level);
     }
 
     async fn finish(self, response: reqwest::Response) -> Result<(reqwest::StatusCode, Vec<u8>)> {
@@ -179,7 +195,7 @@ impl PendingOutboundRequest<'_> {
                     response_body: Some(&truncated),
                     error: None,
                 }
-                .emit();
+                .emit(self.level);
                 Ok((status, body))
             }
             Err(error) => {
@@ -194,7 +210,7 @@ impl PendingOutboundRequest<'_> {
                     response_body: None,
                     error: Some(&message),
                 }
-                .emit();
+                .emit(self.level);
                 Err(error)
             }
         }
@@ -208,6 +224,17 @@ pub(crate) async fn get_logged(
     max_bytes: usize,
     read_context: &'static str,
 ) -> Result<(reqwest::StatusCode, Vec<u8>)> {
+    get_logged_at(client, target, url, max_bytes, read_context, Level::INFO).await
+}
+
+pub(crate) async fn get_logged_at(
+    client: &reqwest::Client,
+    target: &'static str,
+    url: Url,
+    max_bytes: usize,
+    read_context: &'static str,
+    level: Level,
+) -> Result<(reqwest::StatusCode, Vec<u8>)> {
     let started = Instant::now();
     let log_url = redact_url(&url);
     let pending = PendingOutboundRequest {
@@ -218,6 +245,7 @@ pub(crate) async fn get_logged(
         request_body: None,
         max_bytes,
         read_context,
+        level,
     };
     match client.get(url).send().await {
         Ok(response) => pending.finish(response).await,
@@ -248,6 +276,7 @@ pub(crate) async fn post_json_logged(
         request_body: Some(&request_body),
         max_bytes,
         read_context,
+        level: Level::INFO,
     };
     match client.post(url).json(payload).send().await {
         Ok(response) => pending.finish(response).await,

@@ -74,8 +74,8 @@ tracing::info!(
 - Bark Key、通知 token、URL 中的密钥查询参数必须脱敏：Bark Key 和 token 保留首尾各 3 位、中间 `***`（≤6 字符则全 `***`）；高德 `key` 等查询参数整段替换为 `***`
 - 日志可以输出 `latitude` / `longitude`
 - 意外失败用 `error = ?error`（Debug，保留错误链），不要只写字符串。预期的客户端拒绝（例如无效通知链接）可用 `error = %error`（Display）
-- 高频心跳、pong、重复事件使用 `debug`
-- 出站 HTTP 在 `info` 打 `outbound.http`（method、脱敏 URL、status、截断后的响应体）。入站 HTTP 由 `TraceLayer` 在 `info` 记录 method / 脱敏 URI / status，不记录请求体或响应体
+- 高频心跳、pong、重复事件、Huania 秒级轮询使用 `debug`
+- 出站 HTTP 在 `info` 打 `outbound.http`（method、脱敏 URL、status、截断后的响应体），但 Huania 每秒轮询属于高频，成功和失败的 `outbound.http` 都记 `debug`（失败另有 `huania.poll_failed`）。入站 HTTP 由 `TraceLayer` 在 `info` 记录 method / 脱敏 URI / status，不记录请求体或响应体
 
 ### 如何查看和控制日志
 
@@ -95,9 +95,9 @@ docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 # RUST_LOG=disaster_alert=warn,tower_http=warn
 ```
 
-生产默认会打：启动与关停、订阅写入/删除（Key 已脱敏）、数据源 WebSocket 连上、入站请求（method / 脱敏 URI / status）、每次出站 HTTP、以及 warn/error。生产默认不打：心跳/pong、`subscription.confirmation_attempt_completed`、入站请求体、完整 Bark Key、高德 Key、完整通知 token。
+生产默认会打：启动与关停、订阅写入/删除（Key 已脱敏）、数据源 WebSocket 连上、入站请求（method / 脱敏 URI / status）、低频出站 HTTP（Bark、高德、Nominatim）、以及 warn/error。生产默认不打：心跳/pong、Huania 秒级轮询、`subscription.confirmation_attempt_completed`、入站请求体、完整 Bark Key、高德 Key、完整通知 token。
 
-`TraceLayer` 只覆盖打进本服务的入站请求，不会记录出站的高德 / Nominatim / Bark / Huania；那些走 `outbound.http`。
+`TraceLayer` 只覆盖打进本服务的入站请求，不会记录出站的高德 / Nominatim / Bark / Huania；那些走 `outbound.http`。Huania 轮询默认静默，需要看完整响应时把 `RUST_LOG` 调到 `debug`。
 
 注释只解释代码本身看不出的内容，例如上游字段拼写、时区、算法边界、平台限制和业务规则来源，不要写「创建变量」「保存数据」这类逐行复述，也不要写没有指标支撑的「高并发」「百万级」「优化版」
 
