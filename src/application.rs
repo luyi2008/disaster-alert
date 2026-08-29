@@ -4,8 +4,9 @@ use crate::lifecycle;
 use crate::providers::{FanStudioSource, HuaniaSource, WolfxSource};
 use crate::routes::{
     AppState, ReverseGeocoder, admin_device_keys_handler, admin_subscriptions_handler,
-    bark_urls_handler, health_handler, incident_detail_handler, reverse_geocode_handler,
-    status_handler, subscribe_handler, subscription_options_handler, unsubscribe_handler,
+    bark_urls_handler, health_handler, history_handler, incident_detail_handler,
+    reverse_geocode_handler, simulate_handler, status_handler, subscribe_handler,
+    subscription_options_handler, unsubscribe_handler,
 };
 use crate::runtime::{EventRuntime, RuntimeStatus};
 use crate::storage::{RetentionPolicy, Storage};
@@ -26,6 +27,7 @@ use tracing::Level;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const SUBSCRIPTION_BODY_LIMIT_BYTES: usize = 32 * 1024;
+const SIMULATE_BODY_LIMIT_BYTES: usize = 8 * 1024;
 
 pub fn run_from_env() -> Result<()> {
     let dotenv_path = load_dotenv().context("failed to load .env configuration")?;
@@ -131,7 +133,8 @@ async fn run() -> Result<()> {
         subscription_confirmations.clone(),
         config.max_concurrent_notifications,
     )
-    .with_instance_terms_accepted(config.instance_terms_accepted);
+    .with_instance_terms_accepted(config.instance_terms_accepted)
+    .with_wave_speeds(config.p_wave_km_s, config.s_wave_km_s);
     if pruned_contexts > 0 {
         tracing::info!(
             event = "database.notification_contexts_pruned",
@@ -163,6 +166,11 @@ async fn run() -> Result<()> {
             delete(unsubscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
         )
         .route("/api/status", get(status_handler))
+        .route(
+            "/api/simulate",
+            post(simulate_handler).layer(DefaultBodyLimit::max(SIMULATE_BODY_LIMIT_BYTES)),
+        )
+        .route("/api/history", get(history_handler))
         .route("/api/admin/device-keys", get(admin_device_keys_handler))
         .route("/api/admin/subscriptions", get(admin_subscriptions_handler))
         .layer(cors)

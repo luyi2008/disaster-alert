@@ -8,6 +8,7 @@ mod models;
 mod providers;
 mod routes;
 mod runtime;
+mod simulate;
 mod source_registry;
 mod storage;
 mod subscriptions;
