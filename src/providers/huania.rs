@@ -223,12 +223,13 @@ impl HuaniaSource {
     }
 
     async fn fetch(&self, url: Url) -> Result<Vec<HuaniaEarthquakeDto>> {
-        let (status, body) = crate::utils::outbound_log::get_logged(
+        let (status, body) = crate::utils::outbound_log::get_logged_at(
             &self.client,
             "huania",
             url,
             MAX_RESPONSE_BYTES,
             "Huania response",
+            tracing::Level::DEBUG,
         )
         .await?;
         if !status.is_success() {
