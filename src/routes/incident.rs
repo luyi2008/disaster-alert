@@ -696,4 +696,69 @@ mod tests {
         assert!(body["data"]["incident"].is_null());
         Ok(())
     }
+
+    #[tokio::test]
+    async fn simulated_event_keeps_computed_snapshot_without_incident() -> anyhow::Result<()> {
+        let harness = harness()?;
+        let subscription = crate::models::Subscription::new(
+            crate::models::NotificationDestination::Bark {
+                base_url: "https://api.day.app".to_string(),
+                device_key: "abc123".to_string(),
+            },
+            vec![MonitoringTarget {
+                label: "成都锦江".to_string(),
+                point: GeoPoint {
+                    latitude: 30.5954,
+                    longitude: 104.0982,
+                },
+                region: Default::default(),
+            }],
+            vec![AlertRule::default_for(DisasterCategory::EarthquakeWarning)],
+        );
+        let event = crate::simulate::simulated_event(
+            &subscription,
+            InterruptionLevel::Active,
+            "SIM-20260829122100",
+            "2026-08-29T12:21:00Z",
+        )
+        .context("simulated event")?;
+        let target = subscription.targets.first().context("target")?;
+        let timing = crate::simulate::alert_timing(&event, target, 6.0, 3.5, 1_788_017_584_000);
+        let incident_id = IncidentId::derive(&event.event_key());
+        let prepared =
+            harness
+                .state
+                .notification_links
+                .prepare_url_for(NotificationContextInput {
+                    incident_id: &incident_id,
+                    event: &event,
+                    target,
+                    timing: timing.as_ref(),
+                    interruption_level: InterruptionLevel::Active.as_str(),
+                    matched_rule: subscription
+                        .alert(DisasterCategory::EarthquakeWarning)
+                        .context("rule")?,
+                    issued_at_ms: 1_788_017_584_000,
+                })?;
+        harness
+            .state
+            .notification_links
+            .persist_prepared(&prepared)?;
+        let token = prepared.url.rsplit('/').next().context("token")?;
+        let response = incident_detail_handler(
+            State(harness.state.clone()),
+            Path((incident_id.as_str().to_string(), token.to_string())),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "body should load snapshot"
+        );
+        let body = json_body(response).await?;
+        assert_eq!(body["success"], true);
+        assert_eq!(body["data"]["snapshot"]["event"]["title"], event.title);
+        assert!(body["data"]["incident"].is_null());
+        Ok(())
+    }
 }

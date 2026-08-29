@@ -648,7 +648,7 @@ fn simulation_distance_for_intensity(magnitude: f64, depth_km: f64, target: u8) 
     best_distance
 }
 
-fn alert_timing(
+pub(crate) fn alert_timing(
     event: &DisasterEvent,
     target: &MonitoringTarget,
     p_wave_km_s: f64,

@@ -32,7 +32,7 @@ rayon = { version = "1.12.0", default-features = false }
 reqwest = { version = "0.13.4", default-features = false, features = ["http2", "json", "rustls"] }
 roaring = { version = "0.11.4", default-features = false, features = ["std"] }
 serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
-serde_json = { version = "1.0.150", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.150", default-features = false, features = ["raw_value", "std"] }
 sha2 = { version = "0.11.0", default-features = false }
 tokio = { version = "1.52.3", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-tungstenite = { version = "0.29.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
