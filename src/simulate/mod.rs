@@ -371,7 +371,7 @@ pub(crate) async fn dispatch(
             .into_iter()
             .map(|device_key| {
                 manager_for_lookup
-                    .active_subscriptions_by_device_key(&device_key)
+                    .simulate_subscriptions_by_device_key(&device_key)
                     .map(|subscriptions| (device_key, subscriptions))
             })
             .collect::<Result<Vec<_>>>()

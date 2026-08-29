@@ -137,6 +137,20 @@ impl SubscriptionManager {
         self.storage.active_subscriptions_by_device_key(device_key)
     }
 
+    pub(crate) fn simulate_subscriptions_by_device_key(
+        &self,
+        device_key: &str,
+    ) -> Result<Vec<Subscription>> {
+        let mut subscriptions = self.active_subscriptions_by_device_key(device_key)?;
+        if !subscriptions.is_empty() {
+            return Ok(subscriptions);
+        }
+        if let Some(pending) = self.pending_subscription_for_device_key(device_key)? {
+            subscriptions.push(pending);
+        }
+        Ok(subscriptions)
+    }
+
     pub(crate) fn begin_confirmation(
         &self,
         subscription: Subscription,
@@ -295,6 +309,27 @@ impl SubscriptionManager {
 
     pub(crate) fn pending_confirmation_count(&self) -> Result<usize> {
         Ok(self.confirmations()?.len())
+    }
+
+    fn pending_subscription_for_device_key(
+        &self,
+        device_key: &str,
+    ) -> Result<Option<Subscription>> {
+        let mut newest: Option<(u64, Subscription)> = None;
+        for operation in self.confirmations()? {
+            if !operation
+                .subscription
+                .device_key()
+                .eq_ignore_ascii_case(device_key)
+            {
+                continue;
+            }
+            match &newest {
+                Some((id, _)) if *id >= operation.id => {}
+                _ => newest = Some((operation.id, operation.subscription)),
+            }
+        }
+        Ok(newest.map(|(_, subscription)| subscription))
     }
 
     fn confirmations(&self) -> Result<Vec<ConfirmationOperation>> {
