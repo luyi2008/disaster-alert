@@ -20,6 +20,8 @@ tags:
     description: 通知详情（凭据在路径 token 中）
   - name: Operations
     description: 服务状态与健康检查
+  - name: Testing
+    description: 旁路测试推送（不进入真实 EEW 入队）
 paths:
   /api/subscribe:
     post:
@@ -258,7 +260,122 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmptySuccessResponse"
+  /api/simulate:
+    post:
+      tags: [Testing]
+      operationId: simulateAlert
+      summary: 向指定 Bark Key 发送模拟或历史回放预警
+      description: |
+        旁路测试口：合成一条地震预警或回放内置历史目录，只对显式目标设备调用 Bark，**不会**写入 inbox / 匹配队列 / 投递账本，也不会向全站订阅者扇出。
+
+        模式互斥，必须二选一：
+
+        - `notify_level=passive|active|critical`：按每个目标订阅的地点和地震预警烈度带生成能打中该中断级别的假震中。
+        - `source=major` 且 `key=` 目录条目 id：回放内置历史大地震（震中/震级用目录，发震时刻视为现在）。第一版只支持 `major`。
+
+        空 body 时目标为当前 `Authorization: Bearer` 这一把 Key。可选 JSON `device_ID_list` 只推列表中的 Key，不会额外广播给其他订阅者。
+      security:
+        - barkBearer: []
+      parameters:
+        - name: notify_level
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [passive, active, critical]
+          description: 与 `source`/`key` 互斥。
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [major]
+          description: 历史目录名，不是 `DisasterEvent.source`。须与 `key` 同时出现。
+        - name: key
+          in: query
+          required: false
+          schema:
+            type: string
+            examples: [yibin-gaoxian-2026, wenchuan-2008, tangshan-1976]
+          description: 历史目录条目 id。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SimulateRequest"
+            examples:
+              currentDevice:
+                summary: 空对象，等价于空 body，只打 Bearer Key
+                value: {}
+              listedDevices:
+                summary: 只向列表中的 Key 各推一次
+                value:
+                  device_ID_list: [exampleKeyA, exampleKeyB]
+      responses:
+        "200":
+          description: 已向目标设备尝试推送
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SimulateApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: 缺少或无效的 Bearer Bark Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 当前 Key 没有订阅，或历史目录中找不到该 key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+  /api/history:
+    get:
+      tags: [Testing]
+      operationId: listHistory
+      summary: 读取内置历史地震目录
+      description: |
+        公开只读。第一版仅 `source=major`（宜宾高县 2026、汶川、唐山）。
+        可选 `Authorization: Bearer` 时按该 Key 的已存监测点标注 `distance_km` 与 `estimated_intensity`。
+      parameters:
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [major]
+      security:
+        - {}
+        - barkBearer: []
+      responses:
+        "200":
+          description: 历史目录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoryApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: 提供了 Authorization 但 Bark Key 无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 components:
+  securitySchemes:
+    barkBearer:
+      type: http
+      scheme: bearer
+      description: Bark 设备 Key，字符集与长度规则与订阅接口相同。不要把真实 Key 写入文档或测试夹具。
   responses:
     BadRequest:
       description: 请求体、查询参数或订阅规则无效
@@ -519,6 +636,129 @@ components:
           const: false
         message:
           type: string
+    SimulateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        device_ID_list:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: string
+            pattern: "^[A-Za-z0-9]{1,64}$"
+          description: 出现时只向这些 Key 推送；省略则只向 Bearer Key 推送。空数组为 400。
+    SimulateApiResponse:
+      type: object
+      additionalProperties: false
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/SimulateResult"
+    SimulateResult:
+      type: object
+      additionalProperties: false
+      required: [event_id, pushed, skipped, temporary]
+      properties:
+        event_id:
+          type: string
+        pushed:
+          type: integer
+          minimum: 0
+        skipped:
+          type: integer
+          minimum: 0
+        temporary:
+          type: boolean
+          const: false
+          description: 本接口只用已保存订阅，始终为 false。
+        notify_level:
+          type: string
+          enum: [passive, active, critical]
+        source:
+          type: string
+        key:
+          type: string
+    HistoryApiResponse:
+      type: object
+      additionalProperties: false
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/HistoryCatalog"
+    HistoryCatalog:
+      type: object
+      additionalProperties: false
+      required: [source, records]
+      properties:
+        source:
+          type: string
+          const: major
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoryRecord"
+    HistoryRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - key
+        - event_id
+        - origin_time
+        - hypocenter
+        - latitude
+        - longitude
+        - magnitude
+        - depth_km
+        - max_intensity
+        - note
+      properties:
+        source:
+          type: string
+        key:
+          type: string
+        event_id:
+          type: string
+        origin_time:
+          type: string
+        hypocenter:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        magnitude:
+          type: number
+          format: double
+        depth_km:
+          type: number
+          format: double
+        max_intensity:
+          type: string
+        note:
+          type: string
+        estimated_intensity:
+          type: number
+          format: double
+        distance_km:
+          type: number
+          format: double
+        hypocentral_km:
+          type: number
+          format: double
     EmptySuccessResponse:
       type: object
       additionalProperties: false

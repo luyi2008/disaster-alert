@@ -36,11 +36,13 @@ pub(crate) struct AppState {
     pub(crate) instance_terms_accepted: bool,
     pub(crate) storage: Storage,
     pub(crate) subscriptions: SubscriptionManager,
-    bark_notifier: BarkNotifier,
+    pub(crate) bark_notifier: BarkNotifier,
     bark_urls: Vec<String>,
     runtime_status: RuntimeStatus,
     reverse_geocoder: ReverseGeocoder,
     pub(crate) notification_links: NotificationLinkService,
+    pub(crate) p_wave_km_s: f64,
+    pub(crate) s_wave_km_s: f64,
     pub(crate) detail_concurrency: Arc<Semaphore>,
     status_concurrency: Arc<Semaphore>,
     pub(crate) storage_concurrency: Arc<Semaphore>,
@@ -69,6 +71,8 @@ impl AppState {
             runtime_status,
             reverse_geocoder,
             notification_links,
+            p_wave_km_s: 6.0,
+            s_wave_km_s: 3.5,
             detail_concurrency: Arc::new(Semaphore::new(
                 max_concurrent_notifications
                     .saturating_mul(4)
@@ -83,6 +87,12 @@ impl AppState {
 
     pub(crate) fn with_instance_terms_accepted(mut self, accepted: bool) -> Self {
         self.instance_terms_accepted = accepted;
+        self
+    }
+
+    pub(crate) fn with_wave_speeds(mut self, p_wave_km_s: f64, s_wave_km_s: f64) -> Self {
+        self.p_wave_km_s = p_wave_km_s;
+        self.s_wave_km_s = s_wave_km_s;
         self
     }
 }
