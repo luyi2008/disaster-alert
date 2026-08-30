@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::delivery::{
     AlertRecipient, AlertTiming, BarkDeliveryError, BarkNotifier, CountdownRecipient,
     DeadLetterItem, DeliverySuccess, NotificationContextInput, NotificationLinkService,
-    remaining_seconds,
+    disaster_bark_id, remaining_seconds,
 };
 use crate::delivery::{DeliveryBatch, DeliveryRow, RetryItem};
 use crate::events::{EventCoordinator, EventPolicy};
@@ -89,6 +89,7 @@ struct EarthquakeCountdown {
     event: Arc<DisasterEvent>,
     timing: AlertTiming,
     detail_url: String,
+    notification_id: String,
 }
 
 enum CountdownCommand {
@@ -1033,6 +1034,7 @@ impl EventRuntime {
                 &countdown.event,
                 &countdown.timing,
                 &countdown.detail_url,
+                &countdown.notification_id,
             ) => Some(result),
             changed = cancel.changed() => {
                 drop(guard);
@@ -1248,6 +1250,7 @@ impl EventRuntime {
             destination_id: row.destination_id.0,
             target_ordinal: row.target_ordinal,
         };
+        let notification_id = disaster_bark_id(batch.incident_id.as_str(), row.target_ordinal);
         if event.category == DisasterCategory::EarthquakeWarning {
             self.queue_countdown_command(CountdownCommand::Cancel(countdown_key.clone()))
                 .await;
@@ -1261,6 +1264,7 @@ impl EventRuntime {
                 event,
                 timing.as_ref(),
                 &context.url,
+                &notification_id,
             )
             .await;
         self.inner
@@ -1281,6 +1285,7 @@ impl EventRuntime {
                     event: Arc::clone(event),
                     timing,
                     detail_url: context.url,
+                    notification_id,
                 }))
                 .await;
             }

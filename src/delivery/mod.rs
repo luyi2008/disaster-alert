@@ -3,7 +3,7 @@ mod context;
 mod message;
 
 pub(crate) use bark::{AlertRecipient, BarkDeliveryError, BarkPermit, CountdownRecipient};
-pub(crate) use bark::{BarkNotifier, BarkPushConfig};
+pub(crate) use bark::{BarkNotifier, BarkPushConfig, disaster_bark_id};
 #[cfg(test)]
 pub(crate) use context::NotificationIntensityBandSnapshot;
 pub(crate) use context::NotificationLinkService;
