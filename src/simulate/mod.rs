@@ -1,6 +1,6 @@
 use crate::delivery::{
     AlertRecipient, AlertTiming, BarkDeliveryError, BarkNotifier, NotificationContextInput,
-    NotificationLinkService,
+    NotificationLinkService, disaster_bark_id,
 };
 use crate::models::{
     AlertRule, DisasterCategory, DisasterEvent, IncidentId, InterruptionLevel, MonitoringTarget,
@@ -499,6 +499,13 @@ async fn send_one(
         .await
         .context("notification context persist task failed")??;
     let recipient = AlertRecipient::new(subscription, target);
+    let target_ordinal = subscription
+        .targets
+        .iter()
+        .position(|candidate| std::ptr::eq(candidate, target))
+        .and_then(|index| u8::try_from(index).ok())
+        .unwrap_or(0);
+    let notification_id = disaster_bark_id(incident_id.as_str(), target_ordinal);
     context
         .notifier
         .send_disaster_alert(
@@ -507,6 +514,7 @@ async fn send_one(
             event,
             timing.as_ref(),
             &prepared.url,
+            &notification_id,
         )
         .await
         .map_err(|error| match error {

@@ -96,7 +96,13 @@ struct BarkMessage<'a> {
     subtitle: &'a str,
     body: &'a str,
     detail_url: Option<&'a str>,
+    notification_id: Option<&'a str>,
     use_alert_sound: bool,
+}
+
+/// Bark `id`：同一事件对同一监测点的后续推送覆盖同一条通知，而不是每秒新建一条。
+pub(crate) fn disaster_bark_id(incident_id: &str, target_ordinal: u8) -> String {
+    format!("da-{incident_id}-{target_ordinal}")
 }
 
 /// Bark 推送客户端，负责受限并发的可靠投递。
@@ -166,19 +172,7 @@ impl BarkNotifier {
         event: &DisasterEvent,
         timing: Option<&AlertTiming>,
         detail_url: &str,
-    ) -> std::result::Result<(), BarkDeliveryError> {
-        self.send_disaster_alert_inner(recipient, level, event, timing, detail_url, true)
-            .await
-    }
-
-    async fn send_disaster_alert_inner(
-        &self,
-        recipient: &AlertRecipient<'_>,
-        level: &str,
-        event: &DisasterEvent,
-        timing: Option<&AlertTiming>,
-        detail_url: &str,
-        use_alert_sound: bool,
+        notification_id: &str,
     ) -> std::result::Result<(), BarkDeliveryError> {
         let content = format_disaster_alert(event, recipient.target, timing, current_epoch_ms());
         let title = truncate_chars(&content.title, MAX_TITLE_CHARS);
@@ -192,7 +186,8 @@ impl BarkNotifier {
             subtitle: &subtitle,
             body: &body,
             detail_url: Some(detail_url),
-            use_alert_sound,
+            notification_id: Some(notification_id),
+            use_alert_sound: true,
         })
         .await
     }
@@ -203,6 +198,7 @@ impl BarkNotifier {
         event: &DisasterEvent,
         timing: &AlertTiming,
         detail_url: &str,
+        notification_id: &str,
     ) -> std::result::Result<(), BarkDeliveryError> {
         let content =
             format_disaster_alert(event, &recipient.target, Some(timing), current_epoch_ms());
@@ -217,6 +213,7 @@ impl BarkNotifier {
             subtitle: &subtitle,
             body: &body,
             detail_url: Some(detail_url),
+            notification_id: Some(notification_id),
             use_alert_sound: false,
         })
         .await
@@ -263,6 +260,7 @@ impl BarkNotifier {
                 subtitle: &subtitle,
                 body: &body,
                 detail_url: None,
+                notification_id: None,
                 use_alert_sound: false,
             },
             Some(permit),
@@ -293,6 +291,7 @@ impl BarkNotifier {
             subtitle: _,
             body: _,
             detail_url: _,
+            notification_id: _,
             use_alert_sound: _,
         } = message;
         if !self.allows_bark_url(bark_url) {
@@ -422,6 +421,9 @@ fn bark_payload(
     });
     if let Some(detail_url) = message.detail_url {
         payload["url"] = serde_json::json!(detail_url);
+    }
+    if let Some(notification_id) = message.notification_id {
+        payload["id"] = serde_json::json!(notification_id);
     }
     if level != "passive" && message.use_alert_sound {
         payload["volume"] = serde_json::json!(push_config.volume);
@@ -628,13 +630,25 @@ mod tests {
     use super::{
         AlertRecipient, AlertTiming, BarkMessage, BarkNotifier, BarkPushConfig,
         MAX_BARK_PAYLOAD_BYTES, bark_failure_is_transient, bark_payload, classify_bark_response,
-        current_epoch_ms, fitted_bark_payload, normalize_bark_level,
+        current_epoch_ms, disaster_bark_id, fitted_bark_payload, normalize_bark_level,
         subscription_confirmation_summary, truncate_chars, truncate_utf8_bytes_with_ellipsis,
     };
     use crate::models::{
         AlertRule, DisasterCategory, DisasterEvent, GeoPoint, MonitoringTarget,
         NotificationDestination, ProviderChannel, Subscription,
     };
+
+    #[test]
+    fn disaster_bark_id_is_stable_for_an_incident_and_target() {
+        assert_eq!(
+            disaster_bark_id("e5H3N1aTK0iONuCJOb-g-g", 0),
+            "da-e5H3N1aTK0iONuCJOb-g-g-0"
+        );
+        assert_ne!(
+            disaster_bark_id("e5H3N1aTK0iONuCJOb-g-g", 0),
+            disaster_bark_id("6drk-YufkFJURuZVsddNTA", 0)
+        );
+    }
 
     #[test]
     fn truncation_preserves_utf8_boundaries() {
@@ -721,6 +735,7 @@ mod tests {
             subtitle: "接收测试成功",
             body: "订阅配置正在保存",
             detail_url: None,
+            notification_id: None,
             use_alert_sound: false,
         };
         let config = BarkPushConfig {
@@ -749,6 +764,7 @@ mod tests {
             subtitle: "接收测试",
             body: "测试内容",
             detail_url: Some("https://alert.example.com/incidents/test"),
+            notification_id: Some("da-test-incident-0"),
             use_alert_sound: true,
         };
         let config = BarkPushConfig {
@@ -765,6 +781,7 @@ mod tests {
         assert_eq!(payload["volume"], 10);
         assert_eq!(payload["call"], "1");
         assert_eq!(payload["url"], "https://alert.example.com/incidents/test");
+        assert_eq!(payload["id"], "da-test-incident-0");
     }
 
     #[tokio::test]
@@ -838,6 +855,7 @@ mod tests {
             BarkPushConfig::new(Some("alarm".to_string()), 10, "灾害预警".to_string(), true),
         )?;
         let recipient = AlertRecipient::new(&subscription, &subscription.targets[0]);
+        let notification_id = disaster_bark_id("e5H3N1aTK0iONuCJOb-g-g", 0);
         notifier
             .send_disaster_alert(
                 &recipient,
@@ -845,6 +863,7 @@ mod tests {
                 &event,
                 Some(&timing),
                 "https://alerts.example.test/detail",
+                &notification_id,
             )
             .await?;
         notifier
@@ -853,6 +872,7 @@ mod tests {
                 &event,
                 &timing,
                 "https://alerts.example.test/detail",
+                &notification_id,
             )
             .await?;
 
@@ -872,6 +892,8 @@ mod tests {
         anyhow::ensure!(initial["sound"] == "alarm");
         anyhow::ensure!(initial["volume"] == 10);
         anyhow::ensure!(initial["call"] == "1");
+        anyhow::ensure!(initial["id"] == notification_id);
+        anyhow::ensure!(countdown["id"] == notification_id);
         anyhow::ensure!(countdown.get("sound").is_none());
         anyhow::ensure!(countdown.get("volume").is_none());
         anyhow::ensure!(countdown.get("call").is_none());
@@ -898,6 +920,7 @@ mod tests {
             subtitle: &subtitle,
             body: &body,
             detail_url: Some(&detail_url),
+            notification_id: Some("da-fit-payload-0"),
             use_alert_sound: true,
         };
         let config = BarkPushConfig {
