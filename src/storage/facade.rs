@@ -1,4 +1,4 @@
-use super::{FjallStorage, try_now_millis};
+use super::{DeviceDeliveryRecord, FjallStorage, try_now_millis};
 use crate::models::{IncidentId, IncidentRecord};
 use crate::subscriptions::SubscriptionManager;
 use anyhow::{Context, Result};
@@ -80,6 +80,14 @@ impl Storage {
         tokio::task::spawn_blocking(move || storage.persist())
             .await
             .context("Fjall persist task failed")?
+    }
+
+    pub(crate) fn deliveries_for_device_key(
+        &self,
+        device_key: &str,
+        limit: usize,
+    ) -> Result<Option<Vec<DeviceDeliveryRecord>>> {
+        self.inner.deliveries_for_device_key(device_key, limit)
     }
 
     pub(crate) fn inner(&self) -> FjallStorage {

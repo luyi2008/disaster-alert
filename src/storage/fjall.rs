@@ -3,8 +3,8 @@ use crate::delivery::{DeadLetterItem, DeliveryBatch, DeliverySuccess, RetryItem}
 use crate::events::MatchJob;
 use crate::matching::{MatchPlan, MatchScope, PostingBlock};
 use crate::models::{
-    DisasterCategory, DisasterEvent, IncidentCapacity, IncidentId, IncidentRecord, ProviderChannel,
-    Subscription, parse_event_epoch,
+    DisasterCategory, DisasterEvent, IncidentCapacity, IncidentId, IncidentRecord,
+    InterruptionLevel, ProviderChannel, Subscription, parse_event_epoch,
 };
 use crate::subscriptions::{
     CompiledSubscription, DestinationNumericId, MatchPostingKey, SubscriptionCompiler,
@@ -100,6 +100,27 @@ struct StoredDelivery {
     delivered_at_ms: i64,
     event_revision: u64,
     row: crate::delivery::DeliveryRow,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DeviceDeliveryRecord {
+    pub(crate) delivered_at_ms: i64,
+    pub(crate) incident_id: IncidentId,
+    pub(crate) category: DisasterCategory,
+    pub(crate) source: Option<String>,
+    pub(crate) event_id: Option<String>,
+    pub(crate) title: Option<String>,
+    pub(crate) interruption_level: InterruptionLevel,
+    pub(crate) distance_km: f64,
+    pub(crate) estimated_intensity: f64,
+    pub(crate) target_label: Option<String>,
+    pub(crate) bark_base_url: String,
+    event_revision: u64,
+}
+
+struct DestinationLookup {
+    bark_base_url: String,
+    target_labels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1740,6 +1761,144 @@ impl FjallStorage {
             .collect()
     }
 
+    pub(crate) fn deliveries_for_device_key(
+        &self,
+        device_key: &str,
+        limit: usize,
+    ) -> Result<Option<Vec<DeviceDeliveryRecord>>> {
+        anyhow::ensure!(limit > 0, "delivery query limit must be positive");
+        let mut destinations = std::collections::HashMap::<u64, DestinationLookup>::new();
+        for item in self.subscriptions.iter() {
+            let record: StoredSubscription = decode(&item.value()?)?;
+            if !record
+                .subscription
+                .device_key()
+                .eq_ignore_ascii_case(device_key)
+            {
+                continue;
+            }
+            destinations.insert(
+                record.destination_id.0,
+                DestinationLookup {
+                    bark_base_url: record.subscription.bark_base_url().to_string(),
+                    target_labels: record
+                        .subscription
+                        .targets
+                        .iter()
+                        .map(|target| target.label.clone())
+                        .collect(),
+                },
+            );
+        }
+        if destinations.is_empty() {
+            return Ok(None);
+        }
+
+        let mut matched = Vec::new();
+        for item in self.ledger.iter() {
+            let (key, value) = item.into_inner()?;
+            let (incident_id, category, destination_id) = match parse_ledger_key(&key) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    tracing::warn!(
+                        event = "delivery.ledger_key_invalid",
+                        error = ?error,
+                        "delivery.ledger_key_invalid"
+                    );
+                    continue;
+                }
+            };
+            let Some(destination) = destinations.get(&destination_id) else {
+                continue;
+            };
+            let delivery: StoredDelivery = decode(&value)?;
+            let target_label = destination
+                .target_labels
+                .get(usize::from(delivery.row.target_ordinal))
+                .cloned()
+                .filter(|label| !label.is_empty());
+            matched.push(DeviceDeliveryRecord {
+                delivered_at_ms: delivery.delivered_at_ms,
+                incident_id,
+                category,
+                source: None,
+                event_id: None,
+                title: None,
+                interruption_level: delivery.row.interruption_level,
+                distance_km: f64::from(delivery.row.distance_m) / 1_000.0,
+                estimated_intensity: f64::from(delivery.row.intensity_cent) / 100.0,
+                target_label,
+                bark_base_url: destination.bark_base_url.clone(),
+                event_revision: delivery.event_revision,
+            });
+        }
+        matched.sort_by(|left, right| {
+            right
+                .delivered_at_ms
+                .cmp(&left.delivered_at_ms)
+                .then_with(|| right.incident_id.as_str().cmp(left.incident_id.as_str()))
+        });
+        matched.truncate(limit);
+        for record in &mut matched {
+            let (source, event_id, title) = self.delivery_event_fields(
+                &record.incident_id,
+                record.category,
+                record.event_revision,
+            )?;
+            record.source = source;
+            record.event_id = event_id;
+            record.title = title;
+        }
+        Ok(Some(matched))
+    }
+
+    fn delivery_event_fields(
+        &self,
+        incident_id: &IncidentId,
+        category: DisasterCategory,
+        event_revision: u64,
+    ) -> Result<(Option<String>, Option<String>, Option<String>)> {
+        if let Some(event) = self.event(event_revision)? {
+            return Ok((Some(event.source), Some(event.event_id), Some(event.title)));
+        }
+        let Some(incident) = self.incident(incident_id)? else {
+            return Ok((None, None, None));
+        };
+        let event = incident
+            .latest_by_source
+            .iter()
+            .find(|event| event.category == category)
+            .or_else(|| incident.latest_by_source.first());
+        Ok(match event {
+            Some(event) => (
+                Some(event.source.clone()),
+                Some(event.event_id.clone()),
+                Some(event.title.clone()),
+            ),
+            None => (None, None, None),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn put_ledger_delivery_for_test(
+        &self,
+        incident_id: &IncidentId,
+        category: DisasterCategory,
+        delivered_at_ms: i64,
+        event_revision: u64,
+        row: crate::delivery::DeliveryRow,
+    ) -> Result<()> {
+        self.ledger.insert(
+            ledger_key(incident_id, category, row.destination_id.0),
+            encode(&StoredDelivery {
+                delivered_at_ms,
+                event_revision,
+                row,
+            })?,
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn prune(
         &self,
         incident_cutoff_ms: i64,
@@ -1949,6 +2108,19 @@ fn ledger_key(
     key
 }
 
+fn parse_ledger_key(key: &[u8]) -> Result<(IncidentId, DisasterCategory, u64)> {
+    anyhow::ensure!(key.len() == 31, "ledger key length is {}", key.len());
+    let incident_id = std::str::from_utf8(&key[..22]).context("ledger incident id is not UTF-8")?;
+    let incident_id = IncidentId::parse(incident_id).context("ledger incident id is invalid")?;
+    let category = category_from_code(key[22])?;
+    let destination_id = u64::from_be_bytes(
+        key[23..]
+            .try_into()
+            .context("ledger destination id is truncated")?,
+    );
+    Ok((incident_id, category, destination_id))
+}
+
 fn category_code(category: crate::models::DisasterCategory) -> u8 {
     match category {
         crate::models::DisasterCategory::EarthquakeWarning => 1,
@@ -1956,6 +2128,17 @@ fn category_code(category: crate::models::DisasterCategory) -> u8 {
         crate::models::DisasterCategory::WeatherWarning => 3,
         crate::models::DisasterCategory::Tsunami => 4,
         crate::models::DisasterCategory::Typhoon => 5,
+    }
+}
+
+fn category_from_code(code: u8) -> Result<DisasterCategory> {
+    match code {
+        1 => Ok(DisasterCategory::EarthquakeWarning),
+        2 => Ok(DisasterCategory::EarthquakeReport),
+        3 => Ok(DisasterCategory::WeatherWarning),
+        4 => Ok(DisasterCategory::Tsunami),
+        5 => Ok(DisasterCategory::Typhoon),
+        _ => anyhow::bail!("unknown ledger category code {code}"),
     }
 }
 
@@ -2737,6 +2920,93 @@ mod tests {
             storage.delivered_rows(&incident, DisasterCategory::EarthquakeReport)? == vec![row]
         );
         Ok(())
+    }
+
+    #[test]
+    fn deliveries_for_device_key_returns_newest_matching_records() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        let stored = storage.store_subscription(subscription())?;
+        let mut other = subscription();
+        other.destination = NotificationDestination::Bark {
+            base_url: "https://api.day.app".to_string(),
+            device_key: "otherkey".to_string(),
+        };
+        let other = storage.store_subscription(other)?;
+
+        anyhow::ensure!(storage.deliveries_for_device_key("missing", 50)?.is_none());
+        let empty = storage
+            .deliveries_for_device_key("device1", 50)?
+            .context("subscription should be found")?;
+        anyhow::ensure!(empty.is_empty());
+
+        let older = IncidentId::derive("older-incident");
+        let newer = IncidentId::derive("newer-incident");
+        let other_incident = IncidentId::derive("other-incident");
+        storage.put_ledger_delivery_for_test(
+            &older,
+            DisasterCategory::EarthquakeReport,
+            1_000,
+            1,
+            delivery_row_for(&stored, 0, 2_500),
+        )?;
+        storage.put_ledger_delivery_for_test(
+            &newer,
+            DisasterCategory::EarthquakeWarning,
+            2_000,
+            2,
+            delivery_row_for(&stored, 0, 1_000),
+        )?;
+        storage.put_ledger_delivery_for_test(
+            &other_incident,
+            DisasterCategory::EarthquakeReport,
+            3_000,
+            3,
+            delivery_row_for(&other, 0, 9_000),
+        )?;
+
+        let records = storage
+            .deliveries_for_device_key("DEVICE1", 50)?
+            .context("case-insensitive lookup should find the key")?;
+        anyhow::ensure!(records.len() == 2);
+        anyhow::ensure!(records[0].incident_id == newer);
+        anyhow::ensure!(records[0].delivered_at_ms == 2_000);
+        anyhow::ensure!(records[0].category == DisasterCategory::EarthquakeWarning);
+        anyhow::ensure!(records[0].distance_km == 1.0);
+        anyhow::ensure!(records[0].estimated_intensity == 2.5);
+        anyhow::ensure!(records[0].target_label.as_deref() == Some("home"));
+        anyhow::ensure!(records[0].bark_base_url == "https://api.day.app");
+        anyhow::ensure!(records[1].incident_id == older);
+
+        let limited = storage
+            .deliveries_for_device_key("device1", 1)?
+            .context("limited lookup should find the key")?;
+        anyhow::ensure!(limited.len() == 1);
+        anyhow::ensure!(limited[0].incident_id == newer);
+
+        storage.deactivate_subscription(stored.id)?;
+        let after_unsubscribe = storage
+            .deliveries_for_device_key("device1", 50)?
+            .context("inactive subscription should still be queryable")?;
+        anyhow::ensure!(after_unsubscribe.len() == 2);
+        Ok(())
+    }
+
+    fn delivery_row_for(
+        stored: &StoredSubscription,
+        target_ordinal: u8,
+        distance_m: u32,
+    ) -> DeliveryRow {
+        DeliveryRow {
+            destination_id: stored.destination_id,
+            subscription_id: stored.id,
+            generation: stored.generation,
+            target_ordinal,
+            match_kind: 1,
+            interruption_level: InterruptionLevel::Active,
+            distance_m,
+            intensity_cent: 250,
+        }
     }
 
     #[test]

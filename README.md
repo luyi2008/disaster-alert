@@ -232,6 +232,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 - 不要在日志、截图、Issue 或测试数据中使用真实 Bark Key、用户位置或通知详情 URL
 - 修改 `ALERT_SIGNING_KEY` 后，之前发送的详情链接会失效
 - 统计接口只返回聚合数量
+- `GET /api/deliveries` 只返回当前 Bearer Bark Key 自己的成功投递记录，不列出其他设备
 
 ## 使用与部署责任
 
@@ -260,6 +261,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `GET` | `/api/status` | 获取订阅总数、数据源、后台任务状态，以及实例是否已确认责任声明 |
 | `POST` | `/api/simulate` | 向指定 Bark Key 发送模拟或历史回放预警（旁路，不入直播 EEW 管道） |
 | `GET` | `/api/history` | 读取内置历史地震目录 |
+| `GET` | `/api/deliveries` | 按 Bearer Bark Key 查询该设备已成功送达的推送记录 |
 | `GET` | `/health` | 健康检查 |
 
 ## 开发

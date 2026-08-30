@@ -4,7 +4,7 @@ mod fjall;
 
 pub(crate) use codec::{decode_record, encode_record};
 pub(crate) use facade::{BacklogCounts, RetentionPolicy, Storage};
-pub(crate) use fjall::{FjallStorage, InboxItem, IncidentResolutionCapacity};
+pub(crate) use fjall::{DeviceDeliveryRecord, FjallStorage, InboxItem, IncidentResolutionCapacity};
 
 pub(crate) fn try_now_millis() -> anyhow::Result<i64> {
     let duration = std::time::SystemTime::now()

@@ -15,6 +15,7 @@
 **无**
 
 - 不调用 `EventRuntime::submit_*`，不写入 inbox / MatchEngine / 投递账本
+- 因此 `GET /api/deliveries` 查不到这次试推
 - 不复制 saevio 的 `POST /api/simulate?token=` 对 `store.List()` 全站扇出
 - 没有独立的 `POST /api/simulate-history`（历史回放合并进同一个 `POST /api/simulate`）
 - 第一版历史目录只有 `source=major`，没有 Wolfx `cenc` / `jma` 列表
