@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn first_policy_skipped_event_does_not_create_an_incident() -> Result<()> {
-        let cases: [(EventPolicy, fn(&mut DisasterEvent)); 3] = [
+        let cases: [(EventPolicy, fn(&mut DisasterEvent)); 2] = [
             (
                 EventPolicy {
                     ignore_training: true,
@@ -296,13 +296,6 @@ mod tests {
                     ..EventPolicy::default()
                 },
                 |event: &mut DisasterEvent| event.cancel = true,
-            ),
-            (
-                EventPolicy {
-                    stale_origin_seconds: 1,
-                    ..EventPolicy::default()
-                },
-                |_: &mut DisasterEvent| {},
             ),
         ];
         for (policy, mutate) in cases {
@@ -320,6 +313,31 @@ mod tests {
             anyhow::ensure!(storage.pending_match_jobs(1)?.is_empty());
             anyhow::ensure!(storage.incident(&incident_id)?.is_none());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn stale_earthquake_report_is_cataloged_without_matching() -> Result<()> {
+        let now_ms = try_now_millis()?;
+        let policy = EventPolicy {
+            stale_origin_seconds: 600,
+            ..EventPolicy::default()
+        };
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        let mut report = test_event("fanstudio.cenc", "stale-catalog-report");
+        report.occurred_at = rfc3339_seconds_ago(now_ms, 7_200)?;
+        let incident_id = crate::models::IncidentId::derive(&report.event_key());
+        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![report], None)?;
+
+        let job = EventCoordinator::with_policy(storage.clone(), policy).process_next()?;
+        anyhow::ensure!(job.is_none());
+        anyhow::ensure!(storage.pending_inbox(1)?.is_empty());
+        anyhow::ensure!(storage.pending_match_jobs(1)?.is_empty());
+        let incident = storage
+            .incident(&incident_id)?
+            .context("stale reviewed reports should still enter the catalog")?;
+        anyhow::ensure!(!incident.has_matched_subscribers);
         Ok(())
     }
 
@@ -350,13 +368,15 @@ mod tests {
         warning.category = DisasterCategory::EarthquakeWarning;
         warning.channel = ProviderChannel::Wolfx;
         warning.occurred_at = rfc3339_seconds_ago(now_ms, warning_age_seconds)?;
-        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![warning], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![warning.clone()], None)?;
+        let warning_id = crate::models::IncidentId::derive(&warning.event_key());
         anyhow::ensure!(
-            EventCoordinator::with_policy(storage, policy)
+            EventCoordinator::with_policy(storage.clone(), policy)
                 .process_next()?
                 .is_none(),
             "earthquake warnings older than STALE_ORIGIN_SECONDS should still be ignored"
         );
+        anyhow::ensure!(storage.incident(&warning_id)?.is_none());
         Ok(())
     }
 
