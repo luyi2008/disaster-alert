@@ -10,6 +10,15 @@
 
 服务端行为和 Web 交互尽量分开改，跨层改动需要说明数据流如何变化
 
+## 文档
+
+用户可见说明写在 README。开发向知识库存 `docs/`，用主题页而不是 FAQ：
+
+- [docs/simulate.md](docs/simulate.md)：模拟测试旁路与直播管道的边界
+- [docs/storage.md](docs/storage.md)：Fjall keyspace 职责、incident 与 event、过期窗口和保留期限
+
+字段级 HTTP 契约以 [docs/openapi.yaml](docs/openapi.yaml) 为准。改存储分区或保留策略时，同步更新 `docs/storage.md`。
+
 ## 本地检查
 
 本仓只跑 API，入口是 `disaster-alert`：
