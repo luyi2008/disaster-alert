@@ -3268,7 +3268,7 @@ mod tests {
         let storage = FjallStorage::open(directory.path())?;
         let mut warning = correlated_event();
         warning.category = DisasterCategory::EarthquakeWarning;
-        warning.source = "fanstudio.sichuan".to_string();
+        warning.source = "fanstudio.cea".to_string();
         storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![warning], None)?;
         let job = EventCoordinator::new(storage.clone())
             .process_next()?

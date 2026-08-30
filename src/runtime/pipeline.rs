@@ -1582,7 +1582,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unmatched_event_is_not_retained() -> Result<()> {
+    async fn unmatched_event_is_cataloged_without_delivery() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = Storage::open(directory.path())?;
         let notifier = BarkNotifier::new(
@@ -1598,7 +1598,11 @@ mod tests {
         let batch_ids = runtime.process_match_job(job.clone()).await?;
 
         anyhow::ensure!(batch_ids.is_empty());
-        anyhow::ensure!(storage.inner().incident(&job.incident_id)?.is_none());
+        let incident = storage
+            .inner()
+            .incident(&job.incident_id)?
+            .context("unmatched reviewed reports should remain in the catalog")?;
+        anyhow::ensure!(!incident.has_matched_subscribers);
         anyhow::ensure!(storage.inner().event(job.event_revision)?.is_none());
         anyhow::ensure!(storage.inner().match_job(job.id)?.is_none());
         anyhow::ensure!(storage.inner().pending_delivery_batches(1)?.is_empty());
