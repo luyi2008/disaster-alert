@@ -841,7 +841,6 @@ components:
         - interruption_level
         - distance_km
         - estimated_intensity
-        - bark_base_url
       properties:
         delivered_at_ms:
           type: integer
@@ -858,6 +857,19 @@ components:
           description: 数据源事件 ID，事件记录已清理时省略
         title:
           type: string
+        description:
+          type: string
+        magnitude:
+          type: number
+          format: double
+        occurred_at:
+          type: string
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
         interruption_level:
           type: string
           enum: [passive, active, critical]
@@ -869,6 +881,9 @@ components:
           format: double
         target_label:
           type: string
+        device_key:
+          type: string
+          description: 该条投递对应的 Bark Key。用户接口只返回调用方自己的 Key。
         bark_base_url:
           type: string
           format: uri

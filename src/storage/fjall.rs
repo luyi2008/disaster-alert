@@ -107,20 +107,54 @@ pub(crate) struct DeviceDeliveryRecord {
     pub(crate) delivered_at_ms: i64,
     pub(crate) incident_id: IncidentId,
     pub(crate) category: DisasterCategory,
+    pub(crate) device_key: Option<String>,
+    pub(crate) bark_base_url: Option<String>,
     pub(crate) source: Option<String>,
     pub(crate) event_id: Option<String>,
     pub(crate) title: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) magnitude: Option<f64>,
+    pub(crate) occurred_at: Option<String>,
+    pub(crate) latitude: Option<f64>,
+    pub(crate) longitude: Option<f64>,
     pub(crate) interruption_level: InterruptionLevel,
     pub(crate) distance_km: f64,
     pub(crate) estimated_intensity: f64,
     pub(crate) target_label: Option<String>,
-    pub(crate) bark_base_url: String,
     event_revision: u64,
 }
 
 struct DestinationLookup {
+    device_key: String,
     bark_base_url: String,
     target_labels: Vec<String>,
+}
+
+#[derive(Default)]
+struct DeliveryEventFields {
+    source: Option<String>,
+    event_id: Option<String>,
+    title: Option<String>,
+    description: Option<String>,
+    magnitude: Option<f64>,
+    occurred_at: Option<String>,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+}
+
+impl DeliveryEventFields {
+    fn from_event(event: &DisasterEvent) -> Self {
+        Self {
+            source: Some(event.source.clone()),
+            event_id: Some(event.event_id.clone()),
+            title: Some(event.title.clone()),
+            description: Some(event.description.clone()).filter(|value| !value.is_empty()),
+            magnitude: event.magnitude,
+            occurred_at: Some(event.occurred_at.clone()).filter(|value| !value.is_empty()),
+            latitude: event.latitude,
+            longitude: event.longitude,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1763,23 +1797,22 @@ impl FjallStorage {
 
     pub(crate) fn deliveries_for_device_key(
         &self,
-        device_key: &str,
+        device_key: Option<&str>,
         limit: usize,
     ) -> Result<Option<Vec<DeviceDeliveryRecord>>> {
         anyhow::ensure!(limit > 0, "delivery query limit must be positive");
         let mut destinations = std::collections::HashMap::<u64, DestinationLookup>::new();
         for item in self.subscriptions.iter() {
             let record: StoredSubscription = decode(&item.value()?)?;
-            if !record
-                .subscription
-                .device_key()
-                .eq_ignore_ascii_case(device_key)
+            if device_key
+                .is_some_and(|key| !record.subscription.device_key().eq_ignore_ascii_case(key))
             {
                 continue;
             }
             destinations.insert(
                 record.destination_id.0,
                 DestinationLookup {
+                    device_key: record.subscription.device_key().to_string(),
                     bark_base_url: record.subscription.bark_base_url().to_string(),
                     target_labels: record
                         .subscription
@@ -1790,10 +1823,11 @@ impl FjallStorage {
                 },
             );
         }
-        if destinations.is_empty() {
+        if device_key.is_some() && destinations.is_empty() {
             return Ok(None);
         }
 
+        let list_all = device_key.is_none();
         let mut matched = Vec::new();
         for item in self.ledger.iter() {
             let (key, value) = item.into_inner()?;
@@ -1808,27 +1842,36 @@ impl FjallStorage {
                     continue;
                 }
             };
-            let Some(destination) = destinations.get(&destination_id) else {
+            let destination = destinations.get(&destination_id);
+            if destination.is_none() && !list_all {
                 continue;
-            };
+            }
             let delivery: StoredDelivery = decode(&value)?;
-            let target_label = destination
-                .target_labels
-                .get(usize::from(delivery.row.target_ordinal))
-                .cloned()
-                .filter(|label| !label.is_empty());
+            let target_label = destination.and_then(|destination| {
+                destination
+                    .target_labels
+                    .get(usize::from(delivery.row.target_ordinal))
+                    .cloned()
+                    .filter(|label| !label.is_empty())
+            });
             matched.push(DeviceDeliveryRecord {
                 delivered_at_ms: delivery.delivered_at_ms,
                 incident_id,
                 category,
+                device_key: destination.map(|value| value.device_key.clone()),
+                bark_base_url: destination.map(|value| value.bark_base_url.clone()),
                 source: None,
                 event_id: None,
                 title: None,
+                description: None,
+                magnitude: None,
+                occurred_at: None,
+                latitude: None,
+                longitude: None,
                 interruption_level: delivery.row.interruption_level,
                 distance_km: f64::from(delivery.row.distance_m) / 1_000.0,
                 estimated_intensity: f64::from(delivery.row.intensity_cent) / 100.0,
                 target_label,
-                bark_base_url: destination.bark_base_url.clone(),
                 event_revision: delivery.event_revision,
             });
         }
@@ -1837,17 +1880,28 @@ impl FjallStorage {
                 .delivered_at_ms
                 .cmp(&left.delivered_at_ms)
                 .then_with(|| right.incident_id.as_str().cmp(left.incident_id.as_str()))
+                .then_with(|| {
+                    left.device_key
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(right.device_key.as_deref().unwrap_or(""))
+                })
         });
         matched.truncate(limit);
         for record in &mut matched {
-            let (source, event_id, title) = self.delivery_event_fields(
+            let fields = self.delivery_event_fields(
                 &record.incident_id,
                 record.category,
                 record.event_revision,
             )?;
-            record.source = source;
-            record.event_id = event_id;
-            record.title = title;
+            record.source = fields.source;
+            record.event_id = fields.event_id;
+            record.title = fields.title;
+            record.description = fields.description;
+            record.magnitude = fields.magnitude;
+            record.occurred_at = fields.occurred_at;
+            record.latitude = fields.latitude;
+            record.longitude = fields.longitude;
         }
         Ok(Some(matched))
     }
@@ -1857,26 +1911,22 @@ impl FjallStorage {
         incident_id: &IncidentId,
         category: DisasterCategory,
         event_revision: u64,
-    ) -> Result<(Option<String>, Option<String>, Option<String>)> {
+    ) -> Result<DeliveryEventFields> {
         if let Some(event) = self.event(event_revision)? {
-            return Ok((Some(event.source), Some(event.event_id), Some(event.title)));
+            return Ok(DeliveryEventFields::from_event(&event));
         }
         let Some(incident) = self.incident(incident_id)? else {
-            return Ok((None, None, None));
+            return Ok(DeliveryEventFields::default());
         };
         let event = incident
             .latest_by_source
             .iter()
             .find(|event| event.category == category)
             .or_else(|| incident.latest_by_source.first());
-        Ok(match event {
-            Some(event) => (
-                Some(event.source.clone()),
-                Some(event.event_id.clone()),
-                Some(event.title.clone()),
-            ),
-            None => (None, None, None),
-        })
+        Ok(event.map_or_else(
+            DeliveryEventFields::default,
+            DeliveryEventFields::from_event,
+        ))
     }
 
     #[cfg(test)]
@@ -2934,9 +2984,13 @@ mod tests {
         };
         let other = storage.store_subscription(other)?;
 
-        anyhow::ensure!(storage.deliveries_for_device_key("missing", 50)?.is_none());
+        anyhow::ensure!(
+            storage
+                .deliveries_for_device_key(Some("missing"), 50)?
+                .is_none()
+        );
         let empty = storage
-            .deliveries_for_device_key("device1", 50)?
+            .deliveries_for_device_key(Some("device1"), 50)?
             .context("subscription should be found")?;
         anyhow::ensure!(empty.is_empty());
 
@@ -2966,7 +3020,7 @@ mod tests {
         )?;
 
         let records = storage
-            .deliveries_for_device_key("DEVICE1", 50)?
+            .deliveries_for_device_key(Some("DEVICE1"), 50)?
             .context("case-insensitive lookup should find the key")?;
         anyhow::ensure!(records.len() == 2);
         anyhow::ensure!(records[0].incident_id == newer);
@@ -2975,18 +3029,26 @@ mod tests {
         anyhow::ensure!(records[0].distance_km == 1.0);
         anyhow::ensure!(records[0].estimated_intensity == 2.5);
         anyhow::ensure!(records[0].target_label.as_deref() == Some("home"));
-        anyhow::ensure!(records[0].bark_base_url == "https://api.day.app");
+        anyhow::ensure!(records[0].device_key.as_deref() == Some("device1"));
+        anyhow::ensure!(records[0].bark_base_url.as_deref() == Some("https://api.day.app"));
         anyhow::ensure!(records[1].incident_id == older);
 
         let limited = storage
-            .deliveries_for_device_key("device1", 1)?
+            .deliveries_for_device_key(Some("device1"), 1)?
             .context("limited lookup should find the key")?;
         anyhow::ensure!(limited.len() == 1);
         anyhow::ensure!(limited[0].incident_id == newer);
 
+        let all = storage
+            .deliveries_for_device_key(None, 50)?
+            .context("listing all deliveries should succeed")?;
+        anyhow::ensure!(all.len() == 3);
+        anyhow::ensure!(all[0].device_key.as_deref() == Some("otherkey"));
+        anyhow::ensure!(all[0].incident_id == other_incident);
+
         storage.deactivate_subscription(stored.id)?;
         let after_unsubscribe = storage
-            .deliveries_for_device_key("device1", 50)?
+            .deliveries_for_device_key(Some("device1"), 50)?
             .context("inactive subscription should still be queryable")?;
         anyhow::ensure!(after_unsubscribe.len() == 2);
         Ok(())
