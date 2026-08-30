@@ -99,15 +99,18 @@ flowchart LR
 
 ## 什么会留下
 
-不是「发生过的所有速报都在库里」。只有**匹配到订阅并通知过**的 incident 会作为档案保留。`GET /api/admin/events` 列出的就是这些记录。
+不是「台网全量历史都在库里」。地震速报只要本进程接入过，就会留下 incident 档案，**不要求**当时有订阅命中。`GET /api/admin/events` 列出这些记录；`has_matched_subscribers` 区分「接入了」和「有人收到」。
 
-下列情况不会长期写入 `incidents` / `events`：
+预警、气象、海啸、台风未命中时仍不建档。下列情况也不会长期写入 `incidents`：
 
-- 起震时间已超出[过期窗口](#过期窗口与保留期限)，且这场灾害从未通知过任何人
-- 匹配完没有任何订阅命中
-- 演练或取消按策略跳过，且从未通知过
+- 演练或取消按策略跳过，且这场灾害从未通知过、也还没有速报档案
+- 预警等非速报超出[过期窗口](#过期窗口与保留期限)，且从未通知过
+
+过期的地震速报**不通知**，但**会建档**。未命中速报的 `events` 快照在匹配结束后删除，incident 按保留天数留下。
 
 成功推到 Bark 的，另外写入 `ledger`（投递记录）和 `contexts`（详情快照）。
+
+目录完整度受上游限制：Wolfx `cenc_eqlist` 只取当前最新一条，FAN Studio CENC 也是当前快照，不是列表回放。停机期间或同时发生、未出现在「最新一条」里的地震不会仅因保留策略而出现。产品决策见 [prd/earthquake-report-catalog.md](prd/earthquake-report-catalog.md)。
 
 `POST /api/simulate` 不走这条流水线，不会写入 `inbox` / `incidents` / `match_jobs` / `ledger`。旁路边界见 [simulate.md](simulate.md)。
 
@@ -125,7 +128,7 @@ flowchart LR
 | 地震速报 | 至少 3600 秒 | 台网正式测定常在发震后 8–20 分钟才到 |
 | 海啸、台风 | 不按起震时刻丢弃 | — |
 
-`STALE_ORIGIN_SECONDS=0` 关闭该检查。设为 600 时，预警仍是 10 分钟，速报抬到至少 1 小时。这与数据库删除无关：当时推成功了，档案仍按下面的天数保留；当时被当成过期且从未通知，根本不会留下 incident。
+`STALE_ORIGIN_SECONDS=0` 关闭该检查。设为 600 时，预警仍是 10 分钟，速报抬到至少 1 小时。这与数据库删除无关：当时推成功了，档案仍按下面的天数保留；过期速报会建档但不通知；过期预警且从未通知，不会留下 incident。
 
 **保留期限**决定已经入库的记录**何时删除**：
 
@@ -157,7 +160,7 @@ flowchart LR
 | 打开 23 个 keyspace | `src/storage/fjall.rs` |
 | 过期窗口（预警 600s、速报至少 3600s） | `src/events/coordinator.rs` 的 `stale_origin` |
 | 多源合成（约 120 秒 / 100 km / 震级差 1） | `src/storage/fjall.rs` 的 `CORRELATION_*` |
-| 无人命中则丢掉 incident | `commit_incident` / 匹配完成时的 `has_matched_subscribers` |
+| 无人命中则丢掉非速报 incident；速报档案保留 | `commit_incident` / `keep_unmatched_incident` |
 | 重试上限 12 次、24 小时 | `src/runtime/pipeline.rs` 的 `MAX_RETRY_*` |
 | 按天数清理 | `FjallStorage::prune`、`application.rs` 启动时调用 |
 | 重启恢复 | `EventRuntime::recover()` |

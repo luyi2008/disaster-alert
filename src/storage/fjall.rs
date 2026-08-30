@@ -465,10 +465,10 @@ impl FjallStorage {
                 .checked_add(1)
                 .context("Incident pending MatchJob count overflowed")?;
         }
+        let already_stored = existing.is_some();
+        let ledger_present = self.ledger.prefix(incident.id.as_str()).next().is_some();
         if job.is_none()
-            && !incident.has_matched_subscribers
-            && incident.pending_match_jobs == 0
-            && self.ledger.prefix(incident.id.as_str()).next().is_none()
+            && !keep_unmatched_incident(&incident, event, already_stored, ledger_present)
         {
             let mut batch = self.db.batch();
             if let Some(existing) = &existing {
@@ -1467,11 +1467,8 @@ impl FjallStorage {
                 "Incident has a MatchJob without a pending-job count"
             );
             incident.pending_match_jobs -= 1;
-            if batches.is_empty()
-                && !incident.has_matched_subscribers
-                && incident.pending_match_jobs == 0
-                && self.ledger.prefix(incident.id.as_str()).next().is_none()
-            {
+            let ledger_present = self.ledger.prefix(incident.id.as_str()).next().is_some();
+            if batches.is_empty() && !keep_incident_after_empty_match(&incident, ledger_present) {
                 self.remove_incident_indexes(&mut write, &incident)?;
                 write.remove(&self.incidents, incident.id.as_str());
             } else {
@@ -2268,6 +2265,30 @@ fn is_earthquake(category: DisasterCategory) -> bool {
         category,
         DisasterCategory::EarthquakeWarning | DisasterCategory::EarthquakeReport
     )
+}
+
+fn is_earthquake_report_catalog(category: DisasterCategory) -> bool {
+    category == DisasterCategory::EarthquakeReport
+}
+
+fn keep_unmatched_incident(
+    incident: &IncidentRecord,
+    event: &DisasterEvent,
+    already_stored: bool,
+    ledger_present: bool,
+) -> bool {
+    incident.has_matched_subscribers
+        || incident.pending_match_jobs > 0
+        || ledger_present
+        || (is_earthquake_report_catalog(incident.category)
+            && (already_stored || (!event.training && !event.cancel)))
+}
+
+fn keep_incident_after_empty_match(incident: &IncidentRecord, ledger_present: bool) -> bool {
+    incident.has_matched_subscribers
+        || incident.pending_match_jobs > 0
+        || ledger_present
+        || is_earthquake_report_catalog(incident.category)
 }
 
 fn correlation_score(
@@ -3216,7 +3237,7 @@ mod tests {
     }
 
     #[test]
-    fn unmatched_result_removes_incident_event_and_reverse_indexes() -> Result<()> {
+    fn unmatched_result_keeps_earthquake_report_incident_and_drops_event() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = FjallStorage::open(directory.path())?;
         storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![correlated_event()], None)?;
@@ -3230,13 +3251,35 @@ mod tests {
         anyhow::ensure!(storage.incident_correlation.len()? == 1);
 
         storage.commit_match_batches(job.id, &[])?;
+        let incident = storage
+            .incident(&job.incident_id)?
+            .context("catalog incident should remain")?;
+        anyhow::ensure!(!incident.has_matched_subscribers);
+        anyhow::ensure!(storage.event(job.event_revision)?.is_none());
+        anyhow::ensure!(storage.match_job(job.id)?.is_none());
+        anyhow::ensure!(storage.incident_aliases.len()? == 1);
+        anyhow::ensure!(storage.incident_correlation.len()? == 1);
+        Ok(())
+    }
+
+    #[test]
+    fn unmatched_earthquake_warning_still_removes_incident() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        let mut warning = correlated_event();
+        warning.category = DisasterCategory::EarthquakeWarning;
+        warning.source = "fanstudio.sichuan".to_string();
+        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![warning], None)?;
+        let job = EventCoordinator::new(storage.clone())
+            .process_next()?
+            .context("missing match job")?;
+
+        storage.commit_match_batches(job.id, &[])?;
         anyhow::ensure!(storage.incident(&job.incident_id)?.is_none());
         anyhow::ensure!(storage.event(job.event_revision)?.is_none());
         anyhow::ensure!(storage.match_job(job.id)?.is_none());
         anyhow::ensure!(storage.incident_aliases.is_empty()?);
-        anyhow::ensure!(storage.incident_aliases_by_incident.is_empty()?);
         anyhow::ensure!(storage.incident_correlation.is_empty()?);
-        anyhow::ensure!(storage.incident_correlation_by_incident.is_empty()?);
         Ok(())
     }
 
@@ -3260,7 +3303,10 @@ mod tests {
         anyhow::ensure!(storage.event(second_job.event_revision)?.is_some());
 
         storage.commit_match_batches(second_job.id, &[])?;
-        anyhow::ensure!(storage.incident(&first_job.incident_id)?.is_none());
+        let incident = storage
+            .incident(&first_job.incident_id)?
+            .context("catalog incident should remain after the last empty match")?;
+        anyhow::ensure!(!incident.has_matched_subscribers);
         anyhow::ensure!(storage.event(second_job.event_revision)?.is_none());
         anyhow::ensure!(storage.pending_match_jobs(1)?.is_empty());
         Ok(())
