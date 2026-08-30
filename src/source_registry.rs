@@ -105,6 +105,16 @@ pub(crate) const SOURCES: &[SourceDefinition] = &[
         Some(8 * 3600)
     ),
     source!(
+        "wolfx.cenc_eqlist",
+        "cenc_eqlist",
+        Wolfx,
+        EarthquakeReport,
+        "wolfx-earthquake-report",
+        "Wolfx 地震信息",
+        "Wolfx 中国地震台网测定",
+        Some(8 * 3600)
+    ),
+    source!(
         "fanstudio.cea",
         "cea",
         FanStudio,

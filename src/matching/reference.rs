@@ -63,11 +63,7 @@ pub(crate) fn match_subscription(
             DisasterCategory::Tsunami => continue,
             DisasterCategory::Typhoon => (distance.filter(|value| *value <= distance_limit)?, 1),
         };
-        if matches!(
-            event.category,
-            DisasterCategory::EarthquakeWarning | DisasterCategory::EarthquakeReport
-        ) && distance_km > distance_limit
-        {
+        if event.category == DisasterCategory::EarthquakeWarning && distance_km > distance_limit {
             continue;
         }
         let interruption_level = match rule {
@@ -222,9 +218,89 @@ fn bark_level(level: u8) -> InterruptionLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{
+        AlertRule, DisasterCategory, DisasterEvent, InterruptionLevel, SourceSelection,
+        Subscription,
+    };
 
     #[test]
     fn zero_sample_limit_returns_no_events() {
         assert!(sample_events(&[], 0).is_empty());
+    }
+
+    fn subscription(alerts: Vec<AlertRule>) -> Subscription {
+        Subscription::new(
+            crate::models::NotificationDestination::Bark {
+                base_url: "https://api.day.app".to_string(),
+                device_key: "abc123".to_string(),
+            },
+            vec![crate::models::MonitoringTarget {
+                label: "shanghai".to_string(),
+                point: crate::models::GeoPoint {
+                    latitude: 31.2304,
+                    longitude: 121.4737,
+                },
+                region: crate::models::AdministrativeRegion::default(),
+            }],
+            alerts,
+        )
+    }
+
+    fn distant_xinjiang(category: DisasterCategory) -> DisasterEvent {
+        DisasterEvent {
+            category,
+            channel: crate::models::ProviderChannel::FanStudio,
+            source: "fanstudio.cenc".to_string(),
+            event_id: "xinjiang-1".to_string(),
+            revision: "1".to_string(),
+            report_num: 1,
+            title: "地震信息 新疆阿克苏地区沙雅县".to_string(),
+            description: "M3.1 新疆阿克苏地区沙雅县".to_string(),
+            latitude: Some(40.99),
+            longitude: Some(83.54),
+            magnitude: Some(3.1),
+            depth_km: Some(21.0),
+            affected_regions: vec!["新疆".to_string()],
+            radius_km: None,
+            level: 1,
+            occurred_at: "2026-08-30T00:05:04Z".to_string(),
+            final_report: true,
+            cancel: false,
+            training: false,
+        }
+    }
+
+    #[test]
+    fn earthquake_report_notifies_far_events_that_meet_min_magnitude() {
+        let subscription = subscription(vec![AlertRule::EarthquakeReport {
+            sources: SourceSelection::All,
+            min_magnitude: 1.0,
+        }]);
+        assert!(
+            match_subscription(
+                &subscription,
+                &distant_xinjiang(DisasterCategory::EarthquakeReport)
+            )
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn earthquake_warning_does_not_notify_when_local_intensity_is_below_bands() {
+        let subscription = subscription(vec![AlertRule::EarthquakeWarning {
+            sources: SourceSelection::All,
+            estimated_intensity_bands: vec![crate::models::IntensityBand {
+                min: 1,
+                max: 7,
+                interruption_level: InterruptionLevel::Passive,
+            }],
+        }]);
+        assert!(
+            match_subscription(
+                &subscription,
+                &distant_xinjiang(DisasterCategory::EarthquakeWarning)
+            )
+            .is_none()
+        );
     }
 }

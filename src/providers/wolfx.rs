@@ -143,10 +143,7 @@ impl WolfxSource {
                         }
                         continue;
                     }
-                    if matches!(
-                        message_type.as_deref(),
-                        Some("pong" | "jma_eqlist" | "cenc_eqlist")
-                    ) {
+                    if matches!(message_type.as_deref(), Some("pong" | "jma_eqlist")) {
                         continue;
                     }
                     let Some(provider_key) = message_type.as_deref() else {
@@ -218,14 +215,23 @@ pub(super) fn normalize(earthquake: CommonEarthquakeInfo) -> DisasterEvent {
     } else {
         1
     };
+    let category = source_registry::find_provider(ProviderChannel::Wolfx, &earthquake.source_type)
+        .map_or(DisasterCategory::EarthquakeWarning, |source| {
+            source.category
+        });
+    let title_prefix = if category == DisasterCategory::EarthquakeReport {
+        "地震信息"
+    } else {
+        "地震预警"
+    };
     DisasterEvent {
-        category: DisasterCategory::EarthquakeWarning,
+        category,
         channel: ProviderChannel::Wolfx,
         source: format!("wolfx.{}", earthquake.source_type),
         event_id: earthquake.event_id,
         revision: earthquake.report_num.to_string(),
         report_num: earthquake.report_num,
-        title: format!("地震预警 {}", earthquake.region),
+        title: format!("{title_prefix} {}", earthquake.region),
         description: format!(
             "M{:.1} 最大烈度{}",
             earthquake.magnitude, earthquake.max_intensity
@@ -269,5 +275,27 @@ mod tests {
         assert_eq!(event.source, "wolfx.cenc_eew");
         assert_eq!(event.category, DisasterCategory::EarthquakeWarning);
         assert_eq!(event.report_num, 2);
+    }
+
+    #[test]
+    fn normalizes_cenc_eqlist_into_an_earthquake_report() {
+        let event = normalize(CommonEarthquakeInfo {
+            event_id: "CD.20260830080504.457".to_string(),
+            report_num: 1,
+            latitude: 40.99,
+            longitude: 83.54,
+            magnitude: 3.1,
+            depth: Some(21.0),
+            max_intensity: "4".to_string(),
+            region: "新疆阿克苏地区沙雅县".to_string(),
+            origin_time: "2026-08-30 08:05:04".to_string(),
+            source_type: "cenc_eqlist".to_string(),
+            final_report: true,
+            cancel: false,
+            training: false,
+        });
+        assert_eq!(event.source, "wolfx.cenc_eqlist");
+        assert_eq!(event.category, DisasterCategory::EarthquakeReport);
+        assert!(event.title.starts_with("地震信息"));
     }
 }

@@ -118,11 +118,7 @@ fn match_compiled_with_context(
             DisasterCategory::Tsunami => continue,
             DisasterCategory::Typhoon => (distance.filter(|value| *value <= rule.distance_km)?, 1),
         };
-        if matches!(
-            event.category,
-            DisasterCategory::EarthquakeWarning | DisasterCategory::EarthquakeReport
-        ) && distance > rule.distance_km
-        {
+        if event.category == DisasterCategory::EarthquakeWarning && distance > rule.distance_km {
             continue;
         }
         let estimated = if event.category == DisasterCategory::EarthquakeWarning {
@@ -390,5 +386,45 @@ mod tests {
         anyhow::ensure!(matched.target_ordinal == 1);
         anyhow::ensure!(matched.interruption_level == InterruptionLevel::Passive);
         Ok(())
+    }
+
+    #[test]
+    fn earthquake_report_matches_distant_events_by_magnitude_only() {
+        let mut report = event(DisasterCategory::EarthquakeReport);
+        report.latitude = Some(40.99);
+        report.longitude = Some(83.54);
+        report.magnitude = Some(3.1);
+        report.title = "地震信息 新疆阿克苏地区沙雅县".to_string();
+
+        let mut nearby_only = subscription(DisasterCategory::EarthquakeReport, None);
+        nearby_only.rules[0].min_magnitude = 1.0;
+        nearby_only.rules[0].distance_km = 100.0;
+        assert!(
+            match_compiled(&nearby_only, &report).is_some(),
+            "earthquake reports should notify by magnitude even when the epicenter is thousands of kilometers away"
+        );
+
+        nearby_only.rules[0].min_magnitude = 4.0;
+        assert!(match_compiled(&nearby_only, &report).is_none());
+    }
+
+    #[test]
+    fn earthquake_warning_still_requires_estimated_intensity_at_the_target() {
+        let mut warning = event(DisasterCategory::EarthquakeWarning);
+        warning.latitude = Some(40.99);
+        warning.longitude = Some(83.54);
+        warning.magnitude = Some(3.1);
+
+        let mut value = subscription(DisasterCategory::EarthquakeWarning, None);
+        value.rules[0].distance_km = 20_000.0;
+        value.rules[0].intensity_bands = vec![CompiledIntensityBand {
+            min: 1,
+            max: 7,
+            interruption_level: InterruptionLevel::Passive,
+        }];
+        assert!(
+            match_compiled(&value, &warning).is_none(),
+            "a distant M3 warning estimates intensity 0 at a far target and should not match bands starting at 1"
+        );
     }
 }
