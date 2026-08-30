@@ -373,6 +373,54 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
+  /api/deliveries:
+    get:
+      tags: [Notifications]
+      operationId: listDeliveries
+      summary: 查询当前 Bark Key 的推送记录
+      description: |
+        读取本实例投递账本中、对该 Bark Key 已成功送达的灾害通知。
+        按送达时间从新到旧返回，默认最多 50 条，可通过 `limit` 调整（1–200）。
+
+        只包含直播 EEW 管道实际写入账本的成功投递。`POST /api/simulate` 的旁路试推、订阅确认通知、以及仍在重试或已进入死信的失败投递都不会出现。
+        同一事件后续报告在账本中只保留最近一次成功投递。取消订阅后仍可查询保留期内的历史记录。
+      security:
+        - barkBearer: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: 返回条数上限。
+      responses:
+        "200":
+          description: 推送记录，可能为空数组
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveriesApiResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: 缺少或格式无效的 Authorization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 本实例没有该 Bark Key 的订阅记录（含已取消）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     barkBearer:
@@ -762,6 +810,68 @@ components:
         hypocentral_km:
           type: number
           format: double
+    DeliveriesApiResponse:
+      type: object
+      additionalProperties: false
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/DeliveriesResult"
+    DeliveriesResult:
+      type: object
+      additionalProperties: false
+      required: [deliveries]
+      properties:
+        deliveries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryRecord"
+    DeliveryRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - delivered_at_ms
+        - incident_id
+        - category
+        - interruption_level
+        - distance_km
+        - estimated_intensity
+        - bark_base_url
+      properties:
+        delivered_at_ms:
+          type: integer
+          description: Unix 毫秒时间戳
+        incident_id:
+          type: string
+        category:
+          type: string
+          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+        source:
+          type: string
+        event_id:
+          type: string
+          description: 数据源事件 ID，事件记录已清理时省略
+        title:
+          type: string
+        interruption_level:
+          type: string
+          enum: [passive, active, critical]
+        distance_km:
+          type: number
+          format: double
+        estimated_intensity:
+          type: number
+          format: double
+        target_label:
+          type: string
+        bark_base_url:
+          type: string
+          format: uri
     EmptySuccessResponse:
       type: object
       additionalProperties: false
