@@ -84,8 +84,8 @@ pub(crate) fn match_subscription(
                 };
                 band.interruption_level
             }
-            AlertRule::EarthquakeReport { .. }
-            | AlertRule::WeatherWarning { .. }
+            AlertRule::EarthquakeReport { .. } => InterruptionLevel::Passive,
+            AlertRule::WeatherWarning { .. }
             | AlertRule::Tsunami { .. }
             | AlertRule::Typhoon { .. } => bark_level(event.level),
         };
@@ -283,6 +283,20 @@ mod tests {
             )
             .is_some()
         );
+    }
+
+    #[test]
+    fn earthquake_report_uses_passive_interruption_regardless_of_event_level() {
+        let subscription = subscription(vec![AlertRule::EarthquakeReport {
+            sources: SourceSelection::All,
+            min_magnitude: 1.0,
+        }]);
+        let mut report = distant_xinjiang(DisasterCategory::EarthquakeReport);
+        report.level = 4;
+        report.magnitude = Some(7.2);
+        let matched = match_subscription(&subscription, &report)
+            .expect("reviewed reports that meet min magnitude should match");
+        assert_eq!(matched.interruption_level, InterruptionLevel::Passive);
     }
 
     #[test]

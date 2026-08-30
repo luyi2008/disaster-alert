@@ -630,7 +630,7 @@ components:
           format: double
           minimum: 0
           maximum: 10
-          description: 最低震级。地震速报只按震级匹配，不按震中距离或监测点预计烈度过滤。
+          description: 最低震级。地震速报只按震级匹配，不按震中距离或监测点预计烈度过滤。命中后 Bark 中断级别固定为 passive。
     WeatherWarningRule:
       type: object
       additionalProperties: false

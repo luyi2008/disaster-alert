@@ -128,7 +128,9 @@ fn match_compiled_with_context(
         } else {
             0.0
         };
-        let interruption_level = if rule.intensity_bands.is_empty() {
+        let interruption_level = if event.category == DisasterCategory::EarthquakeReport {
+            InterruptionLevel::Passive
+        } else if rule.intensity_bands.is_empty() {
             bark_level(event.level)
         } else {
             let value = estimated.round() as u8;
@@ -406,6 +408,19 @@ mod tests {
 
         nearby_only.rules[0].min_magnitude = 4.0;
         assert!(match_compiled(&nearby_only, &report).is_none());
+    }
+
+    #[test]
+    fn earthquake_report_uses_passive_interruption_regardless_of_event_level() {
+        let mut report = event(DisasterCategory::EarthquakeReport);
+        report.level = 4;
+        report.magnitude = Some(7.2);
+        let matched = match_compiled(
+            &subscription(DisasterCategory::EarthquakeReport, None),
+            &report,
+        )
+        .expect("reviewed reports that meet min magnitude should match");
+        assert_eq!(matched.interruption_level, InterruptionLevel::Passive);
     }
 
     #[test]
