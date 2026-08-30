@@ -155,7 +155,7 @@ docker compose up -d --no-build
 
 数据库保存在 Docker 命名卷中。`docker compose down` 不会删除数据库；`docker compose down -v` 会永久删除数据库。
 
-数据库目录只能由一个应用实例使用，不要增加 `disaster-alert` 服务的副本数。Compose 会等待服务优雅退出并完成数据库刷盘。
+数据库目录只能由一个应用实例使用，不要增加 `disaster-alert` 服务的副本数。Compose 会等待服务优雅退出并完成数据库刷盘。Keyspace 职责、incident 与 event 的差别、过期窗口和保留期限见 [docs/storage.md](docs/storage.md)。
 
 ### 日志
 
@@ -226,7 +226,18 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `AMAP_KEY` | 空 | 可选。高德开放平台 **Web 服务** Key；设置后优先走高德逆地理编码，失败再回退 Nominatim |
 | `AMAP_REGEO_URL` | `https://restapi.amap.com/v3/geocode/regeo` | 高德逆地理编码地址，仅在设置了 `AMAP_KEY` 时使用 |
 
-其余环境变量用于数据保留和 Bark 并发，默认值见 [.env.example](.env.example)。
+### 数据保留
+
+过期窗口（要不要通知）和保留期限（入库后何时删除）不是同一件事，详见 [docs/storage.md](docs/storage.md)。默认值：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `INCIDENT_RETENTION_DAYS` | `180` | 已通知的 incident 档案 |
+| `DELIVERY_LEDGER_RETENTION_DAYS` | `180` | 成功投递账本；须 ≥ incident 保留天数 |
+| `NOTIFICATION_CONTEXT_RETENTION_DAYS` | `365` | Bark 详情页快照 |
+| `OPERATION_RETENTION_DAYS` | `7` | 无人引用的事件修订 |
+
+其余环境变量用于 Bark 并发，默认值见 [.env.example](.env.example)。
 
 ## 安全与隐私
 
@@ -288,7 +299,7 @@ cargo check --all-targets
 cargo test --all-targets
 ```
 
-模拟测试旁路的架构与测试方法见 [docs/simulate.md](docs/simulate.md)。更多开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+模拟测试旁路见 [docs/simulate.md](docs/simulate.md)。Fjall keyspace、incident/event 和保留策略见 [docs/storage.md](docs/storage.md)。更多开发约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 致谢
 
