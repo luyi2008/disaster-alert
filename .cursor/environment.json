@@ -1,0 +1,17 @@
+{
+  "name": "disaster-alert",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "disaster-alert",
+      "command": "cargo run --bin disaster-alert",
+      "description": "Disaster alert JSON API server, listening on http://127.0.0.1:30010"
+    }
+  ],
+  "ports": [
+    {
+      "name": "api",
+      "port": 30010
+    }
+  ]
+}
