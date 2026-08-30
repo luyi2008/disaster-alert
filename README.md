@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 接收 Wolfx、FAN Studio 和 Huania 提供的灾害信息
+- 接收 Wolfx、FAN Studio 提供的灾害信息；Huania 地震预警默认关闭，需设置 `HUANIA_ENABLED=true` 后重启才接入
 - 支持地震预警、地震速报、气象预警、海啸预警和台风信息
 - 每个 Bark 订阅可以配置最多 3 个监测地点
 - 可按灾种、信息来源、预计烈度、震级、严重度和距离设置通知条件
@@ -209,6 +209,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | --- | --- | --- |
 | `RECONNECT_MIN_SECONDS` | `1` | 数据源断开后的最小重连间隔 |
 | `RECONNECT_MAX_SECONDS` | `30` | 数据源断开后的最大重连间隔 |
+| `HUANIA_ENABLED` | `false` | 是否启动 Huania 地震预警 HTTP 轮询。未设置或 `false` 时不创建该数据源、不发轮询请求；改值后需重启进程 |
 | `PUSH_UPDATES` | `false` | 是否推送同一事件的后续报告 |
 | `UPDATE_MIN_REPORT_GAP` | `1` | 后续报告至少间隔多少个报告编号才再次推送 |
 | `IGNORE_TRAINING` | `true` | 是否忽略演练信息 |

@@ -64,6 +64,7 @@ async fn run() -> Result<()> {
         db_path = %config.db_path,
         max_concurrent_notifications = config.max_concurrent_notifications,
         http_pool_size = config.http_pool_size,
+        huania_enabled = config.huania_enabled,
         "config.loaded"
     );
     if !config.instance_terms_accepted {
@@ -209,7 +210,17 @@ async fn run() -> Result<()> {
         .context("failed to bind HTTP listener")?;
     let wolfx = WolfxSource::new(&config, event_runtime.clone(), runtime_status.clone());
     let fanstudio = FanStudioSource::new(&config, event_runtime.clone(), runtime_status.clone());
-    let huania = HuaniaSource::new(&config, event_runtime.clone(), runtime_status.clone())?;
+    let huania = if config.huania_enabled {
+        tracing::info!(event = "huania.enabled", "huania.enabled");
+        Some(HuaniaSource::new(
+            &config,
+            event_runtime.clone(),
+            runtime_status.clone(),
+        )?)
+    } else {
+        tracing::info!(event = "huania.disabled", "huania.disabled");
+        None
+    };
     lifecycle::run_until_shutdown(
         listener,
         app,
