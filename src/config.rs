@@ -52,6 +52,7 @@ pub(crate) struct Config {
     pub(crate) max_concurrent_notifications: usize,
     /// HTTP 连接池大小
     pub(crate) http_pool_size: usize,
+    pub(crate) huania_enabled: bool,
     pub(crate) reverse_geocoding_enabled: bool,
     pub(crate) reverse_geocoding_url: String,
     pub(crate) amap_regeo_url: String,
@@ -102,6 +103,7 @@ impl Config {
                 adaptive_concurrency,
             )?,
             http_pool_size: env_parse("HTTP_POOL_SIZE", adaptive_concurrency)?,
+            huania_enabled: env_bool("HUANIA_ENABLED", false)?,
             reverse_geocoding_enabled: env_bool("REVERSE_GEOCODING_ENABLED", true)?,
             reverse_geocoding_url: env_string(
                 "REVERSE_GEOCODING_URL",
