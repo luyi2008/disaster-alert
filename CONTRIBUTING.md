@@ -16,6 +16,7 @@
 
 - [docs/simulate.md](docs/simulate.md)：模拟测试旁路与直播管道的边界
 - [docs/storage.md](docs/storage.md)：Fjall keyspace 职责、incident 与 event、过期窗口和保留期限
+- [docs/prd/](docs/prd/)：尚未落地或正在落地的产品决策，落地后把结果写回对应主题页
 
 字段级 HTTP 契约以 [docs/openapi.yaml](docs/openapi.yaml) 为准。改存储分区或保留策略时，同步更新 `docs/storage.md`。
 
