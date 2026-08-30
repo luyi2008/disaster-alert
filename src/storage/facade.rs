@@ -84,7 +84,7 @@ impl Storage {
 
     pub(crate) fn deliveries_for_device_key(
         &self,
-        device_key: &str,
+        device_key: Option<&str>,
         limit: usize,
     ) -> Result<Option<Vec<DeviceDeliveryRecord>>> {
         self.inner.deliveries_for_device_key(device_key, limit)
