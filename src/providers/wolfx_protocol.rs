@@ -336,7 +336,75 @@ struct WebSocketMessage {
 }
 
 pub(super) fn parse(json: &str) -> Result<CommonEarthquakeInfo, serde_json::Error> {
+    let message: WebSocketMessage = serde_json::from_str(json)?;
+    if message.message_type == "cenc_eqlist" {
+        return parse_cenc_eqlist(json);
+    }
     EarthquakeData::parse_to_common_info(json)
+}
+
+fn parse_cenc_eqlist(json: &str) -> Result<CommonEarthquakeInfo, serde_json::Error> {
+    let root: serde_json::Value = serde_json::from_str(json)?;
+    let latest = root.get("No1").ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cenc_eqlist is missing No1",
+        ))
+    })?;
+    let event_id = json_string(latest, &["EventID", "eventId"]).ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cenc_eqlist No1 is missing EventID",
+        ))
+    })?;
+    let latitude = super::value::f64(latest, &["latitude", "Latitude"]).ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cenc_eqlist No1 is missing latitude",
+        ))
+    })?;
+    let longitude = super::value::f64(latest, &["longitude", "Longitude"]).ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cenc_eqlist No1 is missing longitude",
+        ))
+    })?;
+    let magnitude = super::value::f64(latest, &["magnitude", "Magnitude"]).ok_or_else(|| {
+        serde_json::Error::io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cenc_eqlist No1 is missing magnitude",
+        ))
+    })?;
+    let region = json_string(latest, &["location", "placeName", "HypoCenter"]).unwrap_or_default();
+    let report_kind = json_string(latest, &["type"]).unwrap_or_default();
+    Ok(CommonEarthquakeInfo {
+        event_id,
+        report_num: 1,
+        latitude,
+        longitude,
+        magnitude,
+        depth: super::value::f64(latest, &["depth", "Depth"]),
+        max_intensity: json_string(latest, &["intensity", "MaxIntensity"])
+            .unwrap_or_else(|| "未知".to_string()),
+        region,
+        origin_time: json_string(latest, &["time", "OriginTime"]).unwrap_or_default(),
+        source_type: "cenc_eqlist".to_string(),
+        final_report: report_kind.eq_ignore_ascii_case("reviewed"),
+        cancel: false,
+        training: false,
+    })
+}
+
+fn json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        let field = value.get(*key)?;
+        field
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| field.as_i64().map(|number| number.to_string()))
+    })
 }
 
 #[cfg(test)]
@@ -393,6 +461,22 @@ mod tests {
             assert!(jma.training);
             assert!(jma.final_report);
             assert!(jma.cancel);
+        }
+    }
+
+    #[test]
+    fn parses_cenc_eqlist_latest_entry_as_an_earthquake_report() {
+        let parsed = parse(
+            r#"{"type":"cenc_eqlist","No1":{"type":"reviewed","EventID":"CD.20260830080504.457","time":"2026-08-30 08:05:04","location":"新疆阿克苏地区沙雅县","placeName":"新疆阿克苏地区沙雅县","magnitude":"3.1","depth":"21","latitude":"40.99","longitude":"83.54","intensity":"4"},"md5":"abc"}"#,
+        );
+        assert!(parsed.is_ok(), "{parsed:?}");
+        if let Ok(info) = parsed {
+            assert_eq!(info.source_type, "cenc_eqlist");
+            assert_eq!(info.event_id, "CD.20260830080504.457");
+            assert_eq!(info.magnitude, 3.1);
+            assert_eq!(info.depth, Some(21.0));
+            assert_eq!(info.origin_time, "2026-08-30 08:05:04");
+            assert!(info.final_report);
         }
     }
 }

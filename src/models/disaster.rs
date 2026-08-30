@@ -384,6 +384,7 @@ mod tests {
             "wolfx.sc_eew",
             "wolfx.fj_eew",
             "wolfx.cq_eew",
+            "wolfx.cenc_eqlist",
         ] {
             let value = event(DisasterCategory::EarthquakeWarning, source, "event-1");
             assert_eq!(parse_event_epoch(&value), expected, "source {source}");

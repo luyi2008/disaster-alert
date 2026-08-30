@@ -138,24 +138,28 @@ impl EventCoordinator {
     }
 }
 
+/// 地震速报正式测定常在发震 8–20 分钟后才到达。预警用的 10 分钟窗口会把它们丢掉。
+const EARTHQUAKE_REPORT_MIN_STALE_ORIGIN_SECONDS: i64 = 3_600;
+
 fn stale_origin(
     event: &crate::models::DisasterEvent,
     stale_origin_seconds: i64,
     now_ms: i64,
 ) -> bool {
-    if stale_origin_seconds <= 0
-        || !matches!(
-            event.category,
-            DisasterCategory::EarthquakeWarning
-                | DisasterCategory::EarthquakeReport
-                | DisasterCategory::WeatherWarning
-        )
-    {
+    if stale_origin_seconds <= 0 {
         return false;
     }
-    parse_event_epoch(event).is_none_or(|occurred| {
-        now_ms.div_euclid(1_000).saturating_sub(occurred) > stale_origin_seconds
-    })
+    let limit = match event.category {
+        DisasterCategory::EarthquakeWarning | DisasterCategory::WeatherWarning => {
+            stale_origin_seconds
+        }
+        DisasterCategory::EarthquakeReport => {
+            stale_origin_seconds.max(EARTHQUAKE_REPORT_MIN_STALE_ORIGIN_SECONDS)
+        }
+        DisasterCategory::Tsunami | DisasterCategory::Typhoon => return false,
+    };
+    parse_event_epoch(event)
+        .is_none_or(|occurred| now_ms.div_euclid(1_000).saturating_sub(occurred) > limit)
 }
 
 #[cfg(test)]
@@ -317,6 +321,81 @@ mod tests {
             anyhow::ensure!(storage.incident(&incident_id)?.is_none());
         }
         Ok(())
+    }
+
+    #[test]
+    fn official_earthquake_reports_are_kept_after_the_eew_stale_window() -> Result<()> {
+        let now_ms = try_now_millis()?;
+        let report_age_seconds = 700;
+        let warning_age_seconds = 700;
+        let policy = EventPolicy {
+            stale_origin_seconds: 600,
+            ..EventPolicy::default()
+        };
+
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        let mut report = test_event("fanstudio.cenc", "xinjiang-report");
+        report.occurred_at = rfc3339_seconds_ago(now_ms, report_age_seconds)?;
+        report.magnitude = Some(3.1);
+        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![report], None)?;
+        anyhow::ensure!(
+            EventCoordinator::with_policy(storage.clone(), policy)
+                .process_next()?
+                .is_some(),
+            "reviewed CENC reports that arrive ~10 minutes after origin must still match"
+        );
+
+        let mut warning = test_event("wolfx.cenc_eew", "stale-warning");
+        warning.category = DisasterCategory::EarthquakeWarning;
+        warning.channel = ProviderChannel::Wolfx;
+        warning.occurred_at = rfc3339_seconds_ago(now_ms, warning_age_seconds)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![warning], None)?;
+        anyhow::ensure!(
+            EventCoordinator::with_policy(storage, policy)
+                .process_next()?
+                .is_none(),
+            "earthquake warnings older than STALE_ORIGIN_SECONDS should still be ignored"
+        );
+        Ok(())
+    }
+
+    fn rfc3339_seconds_ago(now_ms: i64, seconds: i64) -> Result<String> {
+        let epoch = now_ms.div_euclid(1_000).saturating_sub(seconds);
+        let days = epoch.div_euclid(86_400);
+        let day_seconds = epoch.rem_euclid(86_400);
+        let (year, month, day) = civil_from_days(days);
+        anyhow::ensure!(
+            (1970..=9999).contains(&year),
+            "test timestamp is outside the supported date range"
+        );
+        let hour = day_seconds / 3_600;
+        let minute = day_seconds.rem_euclid(3_600) / 60;
+        let second = day_seconds.rem_euclid(60);
+        Ok(format!(
+            "{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z"
+        ))
+    }
+
+    fn civil_from_days(days: i64) -> (i64, i64, i64) {
+        let shifted = days + 719_468;
+        let era = (if shifted >= 0 {
+            shifted
+        } else {
+            shifted - 146_096
+        })
+        .div_euclid(146_097);
+        let day_of_era = shifted - era * 146_097;
+        let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524
+            - day_of_era / 146_096)
+            .div_euclid(365);
+        let year = year_of_era + era * 400;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let month_part = (5 * day_of_year + 2).div_euclid(153);
+        let day = day_of_year - (153 * month_part + 2).div_euclid(5) + 1;
+        let month = month_part + if month_part < 10 { 3 } else { -9 };
+        let year = year + i64::from(month <= 2);
+        (year, month, day)
     }
 
     fn commit_matched_job(storage: &FjallStorage, job: &MatchJob) -> Result<()> {
