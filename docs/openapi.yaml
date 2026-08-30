@@ -379,8 +379,9 @@ paths:
       operationId: listDeliveries
       summary: 查询当前 Bark Key 的推送记录
       description: |
-        读取本实例投递账本中、对该 Bark Key 已成功送达的灾害通知。
+        读取本实例投递账本中、对**当前** `Authorization: Bearer` Bark Key 已成功送达的灾害通知。
         按送达时间从新到旧返回，默认最多 50 条，可通过 `limit` 调整（1–200）。
+        本接口不是运营全站查询，不能用空 Key 或设备列表列出其他订阅者的投递。
 
         只包含直播 EEW 管道实际写入账本的成功投递。`POST /api/simulate` 的旁路试推、订阅确认通知、以及仍在重试或已进入死信的失败投递都不会出现。
         同一事件后续报告在账本中只保留最近一次成功投递。取消订阅后仍可查询保留期内的历史记录。

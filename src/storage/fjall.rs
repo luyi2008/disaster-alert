@@ -341,6 +341,22 @@ impl FjallStorage {
         get_record(&self.incidents, id.as_str().as_bytes())
     }
 
+    pub(crate) fn recent_incidents(&self, limit: usize) -> Result<Vec<IncidentRecord>> {
+        anyhow::ensure!(limit > 0, "incident query limit must be positive");
+        let mut incidents = Vec::<IncidentRecord>::new();
+        for item in self.incidents.iter() {
+            incidents.push(decode(&item.value()?)?);
+        }
+        incidents.sort_by(|left, right| {
+            right
+                .updated_at_ms
+                .cmp(&left.updated_at_ms)
+                .then_with(|| right.id.as_str().cmp(left.id.as_str()))
+        });
+        incidents.truncate(limit);
+        Ok(incidents)
+    }
+
     pub(crate) fn resolve_incident(&self, event: &DisasterEvent) -> Result<IncidentId> {
         let event_key = event.event_key();
         let alias = incident_alias(&event_key);
@@ -3284,6 +3300,57 @@ mod tests {
         anyhow::ensure!(storage.incident(&first_job.incident_id)?.is_some());
         anyhow::ensure!(storage.event(second_job.event_revision)?.is_none());
         anyhow::ensure!(!storage.incident_aliases.is_empty()?);
+        Ok(())
+    }
+
+    #[test]
+    fn recent_incidents_are_newest_first_and_respect_limit() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        anyhow::ensure!(storage.recent_incidents(50)?.is_empty());
+
+        let coordinator = EventCoordinator::new(storage.clone());
+        let mut first = correlated_event();
+        first.event_id = "older-quake".to_string();
+        first.title = "older".to_string();
+        first.occurred_at = "2026-01-01T00:00:00Z".to_string();
+        first.latitude = Some(31.2);
+        first.longitude = Some(121.5);
+        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![first], None)?;
+        coordinator.process_next()?.context("missing first job")?;
+        std::thread::sleep(std::time::Duration::from_millis(2));
+
+        let mut second = correlated_event();
+        second.event_id = "newer-quake".to_string();
+        second.title = "newer".to_string();
+        second.occurred_at = "2026-06-01T00:00:00Z".to_string();
+        second.latitude = Some(25.0);
+        second.longitude = Some(80.0);
+        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![second], None)?;
+        coordinator.process_next()?.context("missing second job")?;
+
+        let listed = storage.recent_incidents(50)?;
+        anyhow::ensure!(listed.len() == 2);
+        anyhow::ensure!(listed[0].latest_by_source[0].title == "newer");
+        anyhow::ensure!(listed[1].latest_by_source[0].title == "older");
+        anyhow::ensure!(storage.recent_incidents(1)?.len() == 1);
+        anyhow::ensure!(storage.recent_incidents(1)?[0].latest_by_source[0].title == "newer");
+
+        let mut update = correlated_event();
+        update.event_id = "newer-quake".to_string();
+        update.title = "newer-update".to_string();
+        update.report_num = 2;
+        update.revision = "2".to_string();
+        update.occurred_at = "2026-06-01T00:00:00Z".to_string();
+        update.latitude = Some(25.0);
+        update.longitude = Some(80.0);
+        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![update], None)?;
+        coordinator.process_next()?;
+        let after_update = storage.recent_incidents(50)?;
+        anyhow::ensure!(after_update.len() == 2);
+        anyhow::ensure!(after_update[0].latest_by_source[0].title == "newer-update");
+        anyhow::ensure!(after_update[0].latest_by_source[0].report_num == 2);
+        anyhow::ensure!(after_update[0].timeline.len() == 2);
         Ok(())
     }
 }
