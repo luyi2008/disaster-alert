@@ -261,7 +261,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `GET` | `/api/status` | 获取订阅总数、数据源、后台任务状态，以及实例是否已确认责任声明 |
 | `POST` | `/api/simulate` | 向指定 Bark Key 发送模拟或历史回放预警（旁路，不入直播 EEW 管道） |
 | `GET` | `/api/history` | 读取内置历史地震目录 |
-| `GET` | `/api/deliveries` | 按 Bearer Bark Key 查询该设备已成功送达的推送记录 |
+| `GET` | `/api/deliveries` | 只查当前 Bearer Bark Key 的成功投递，不能查其他设备 |
 | `GET` | `/health` | 健康检查 |
 
 ## 开发

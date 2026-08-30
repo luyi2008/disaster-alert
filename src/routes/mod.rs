@@ -1,3 +1,4 @@
+mod admin_events;
 mod admin_subscriptions;
 mod deliveries;
 mod incident;
@@ -5,6 +6,7 @@ mod reverse_geocoder;
 mod simulate;
 mod subscribe;
 
+pub(crate) use admin_events::admin_events_handler;
 pub(crate) use admin_subscriptions::{admin_device_keys_handler, admin_subscriptions_handler};
 pub(crate) use deliveries::{admin_deliveries_handler, deliveries_handler};
 pub(crate) use incident::incident_detail_handler;
