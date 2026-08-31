@@ -29,7 +29,8 @@ pub(crate) struct ChannelMetrics {
 pub(crate) struct RuntimeStatusSnapshot {
     pub(crate) wolfx: ChannelSnapshot,
     pub(crate) fanstudio: ChannelSnapshot,
-    pub(crate) huania: ChannelSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) huania: Option<ChannelSnapshot>,
     pub(crate) durable: DurableBacklogSnapshot,
     pub(crate) ready_queues: ReadyQueuesSnapshot,
 }
@@ -96,11 +97,15 @@ impl RuntimeStatus {
         &self.huania
     }
 
-    pub(crate) fn snapshot(&self, durable: DurableBacklogSnapshot) -> RuntimeStatusSnapshot {
+    pub(crate) fn snapshot(
+        &self,
+        durable: DurableBacklogSnapshot,
+        huania_enabled: bool,
+    ) -> RuntimeStatusSnapshot {
         RuntimeStatusSnapshot {
             wolfx: self.wolfx.snapshot(),
             fanstudio: self.fanstudio.snapshot(),
-            huania: self.huania.snapshot(),
+            huania: huania_enabled.then(|| self.huania.snapshot()),
             durable,
             ready_queues: ReadyQueuesSnapshot {
                 inbox: self.inbox_ready.snapshot(),
