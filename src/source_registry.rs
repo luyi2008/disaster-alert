@@ -389,12 +389,15 @@ pub(crate) fn find_provider(
         .find(|source| source.channel == channel && source.provider_key == provider_key)
 }
 
-pub(crate) fn category_options() -> Vec<CategoryOption> {
+pub(crate) fn category_options(huania_enabled: bool) -> Vec<CategoryOption> {
     DisasterCategory::ALL
         .into_iter()
         .map(|category| {
             let mut source_groups = Vec::<SourceGroup>::new();
             for source in SOURCES.iter().filter(|source| source.category == category) {
+                if !huania_enabled && source.channel == ProviderChannel::Huania {
+                    continue;
+                }
                 if let Some(group) = source_groups
                     .iter_mut()
                     .find(|group| group.id == source.group_id)
@@ -458,13 +461,37 @@ mod tests {
             );
         }
         assert_eq!(
-            category_options()
+            category_options(true)
                 .iter()
                 .flat_map(|category| &category.source_groups)
                 .map(|group| group.sources.len())
                 .sum::<usize>(),
             SOURCES.len()
         );
+    }
+
+    #[test]
+    fn disabled_huania_is_omitted_from_subscription_options() {
+        let options = category_options(false);
+        let ids = source_ids(&options);
+        assert!(!ids.contains(&"huania.earlywarning"));
+        assert!(source_ids(&category_options(true)).contains(&"huania.earlywarning"));
+        assert_eq!(
+            ids.len(),
+            SOURCES
+                .iter()
+                .filter(|source| source.channel != ProviderChannel::Huania)
+                .count()
+        );
+    }
+
+    fn source_ids(options: &[CategoryOption]) -> Vec<&'static str> {
+        options
+            .iter()
+            .flat_map(|category| &category.source_groups)
+            .flat_map(|group| &group.sources)
+            .map(|source| source.id)
+            .collect()
     }
 
     #[test]

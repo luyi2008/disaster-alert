@@ -136,6 +136,7 @@ async fn run() -> Result<()> {
         config.max_concurrent_notifications,
     )
     .with_instance_terms_accepted(config.instance_terms_accepted)
+    .with_huania_enabled(config.huania_enabled)
     .with_wave_speeds(config.p_wave_km_s, config.s_wave_km_s);
     if pruned_contexts > 0 {
         tracing::info!(

@@ -146,6 +146,7 @@ paths:
       tags: [Metadata]
       operationId: getSubscriptionOptions
       summary: 获取灾种、来源和默认订阅规则
+      description: 未启用 Huania（`HUANIA_ENABLED=false`）时，返回的来源列表不含 Huania。
       responses:
         "200":
           description: 订阅选项
@@ -237,6 +238,7 @@ paths:
       tags: [Operations]
       operationId: getStatus
       summary: 获取运行状态
+      description: 未启用 Huania（`HUANIA_ENABLED=false`）时，响应不含 `huania` 字段。
       responses:
         "200":
           description: 订阅数量、数据源状态和任务队列状态
@@ -1239,7 +1241,7 @@ components:
     Status:
       type: object
       additionalProperties: false
-      required: [instance_terms_accepted, total_subscriptions, wolfx, fanstudio, huania, durable, ready_queues]
+      required: [instance_terms_accepted, total_subscriptions, wolfx, fanstudio, durable, ready_queues]
       properties:
         instance_terms_accepted:
           type: boolean
@@ -1253,6 +1255,7 @@ components:
           $ref: "#/components/schemas/ChannelStatus"
         huania:
           $ref: "#/components/schemas/ChannelStatus"
+          description: 仅在 `HUANIA_ENABLED=true` 时出现。未启用时省略该字段。
         durable:
           $ref: "#/components/schemas/DurableBacklog"
         ready_queues:

@@ -48,6 +48,7 @@ pub(crate) struct AppState {
     pub(crate) storage_concurrency: Arc<Semaphore>,
     subscription_concurrency: Arc<Semaphore>,
     subscription_confirmations: SubscriptionConfirmationService,
+    huania_enabled: bool,
 }
 
 impl AppState {
@@ -82,11 +83,17 @@ impl AppState {
             storage_concurrency: Arc::new(Semaphore::new(32)),
             subscription_concurrency: Arc::new(Semaphore::new(16)),
             subscription_confirmations,
+            huania_enabled: false,
         }
     }
 
     pub(crate) fn with_instance_terms_accepted(mut self, accepted: bool) -> Self {
         self.instance_terms_accepted = accepted;
+        self
+    }
+
+    pub(crate) fn with_huania_enabled(mut self, enabled: bool) -> Self {
+        self.huania_enabled = enabled;
         self
     }
 
@@ -343,11 +350,13 @@ pub(crate) struct SubscriptionOptionsResponse {
     pub(crate) categories: Vec<CategoryOption>,
 }
 
-pub(crate) async fn subscription_options_handler() -> impl IntoResponse {
+pub(crate) async fn subscription_options_handler(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
     Json(ApiResponse::success(
         "订阅选项获取成功",
         Some(SubscriptionOptionsResponse {
-            categories: category_options(),
+            categories: category_options(state.huania_enabled),
         }),
     ))
 }
@@ -578,7 +587,7 @@ pub(crate) async fn status_handler(State(state): State<AppState>) -> impl IntoRe
                 Some(StatusResponse {
                     instance_terms_accepted: state.instance_terms_accepted,
                     total_subscriptions,
-                    runtime: state.runtime_status.snapshot(durable),
+                    runtime: state.runtime_status.snapshot(durable, state.huania_enabled),
                 }),
             )),
         ),
@@ -676,11 +685,11 @@ mod tests {
     }
 
     #[test]
-    fn status_response_flattens_subscription_count_and_runtime_metrics() {
+    fn status_response_omits_huania_when_disabled() {
         let response = StatusResponse {
             instance_terms_accepted: true,
             total_subscriptions: 12,
-            runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default()),
+            runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default(), false),
         };
         let value = serde_json::to_value(response).expect("status response should serialize");
 
@@ -688,9 +697,24 @@ mod tests {
         assert_eq!(value["total_subscriptions"], 12);
         assert!(value.get("wolfx").is_some());
         assert!(value.get("fanstudio").is_some());
-        assert!(value.get("huania").is_some());
+        assert!(value.get("huania").is_none());
         assert!(value.get("durable").is_some());
         assert!(value.get("ready_queues").is_some());
+        assert!(value.get("runtime").is_none());
+    }
+
+    #[test]
+    fn status_response_includes_huania_when_enabled() {
+        let response = StatusResponse {
+            instance_terms_accepted: true,
+            total_subscriptions: 12,
+            runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default(), true),
+        };
+        let value = serde_json::to_value(response).expect("status response should serialize");
+
+        assert!(value.get("wolfx").is_some());
+        assert!(value.get("fanstudio").is_some());
+        assert!(value.get("huania").is_some());
         assert!(value.get("runtime").is_none());
     }
 }
