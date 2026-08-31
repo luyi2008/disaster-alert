@@ -129,6 +129,41 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/subscriptions:
+    get:
+      tags: [Subscriptions]
+      operationId: listSubscriptions
+      summary: 查询当前 Bark Key 的激活订阅
+      description: |
+        返回本实例中、对**当前** `Authorization: Bearer` Bark Key 仍然激活的订阅（地点与规则）。
+        同一 Key 挂在多个 Bark URL 上时会返回多条。本接口不是运营全站查询，不能用空 Key 列出其他订阅者。
+
+        只包含已激活订阅。待确认、已取消或不存在的 Key 返回 404。不要求 `INSTANCE_TERMS_ACCEPTED`。
+      security:
+        - barkBearer: []
+      responses:
+        "200":
+          description: 当前激活的订阅列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionsApiResponse"
+        "401":
+          description: 缺少或格式无效的 Authorization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 订阅不存在或已取消
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/bark-urls:
     get:
       tags: [Metadata]
@@ -921,6 +956,66 @@ components:
         saved:
           type: boolean
           description: "`true` 表示订阅已激活；`false` 表示确认仍在后台重试。"
+    SubscriptionsApiResponse:
+      type: object
+      additionalProperties: false
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/SubscriptionsResult"
+    SubscriptionsResult:
+      type: object
+      additionalProperties: false
+      required: [subscriptions]
+      properties:
+        subscriptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubscriptionRecord"
+    SubscriptionRecord:
+      type: object
+      additionalProperties: false
+      required: [destination, targets, alerts, created_at, updated_at]
+      properties:
+        destination:
+          $ref: "#/components/schemas/BarkDestinationView"
+        targets:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/MonitoringTarget"
+        alerts:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            $ref: "#/components/schemas/AlertRule"
+        created_at:
+          type: integer
+          description: Unix 毫秒时间戳
+        updated_at:
+          type: integer
+          description: Unix 毫秒时间戳
+    BarkDestinationView:
+      type: object
+      additionalProperties: false
+      required: [type, base_url, device_key]
+      properties:
+        type:
+          type: string
+          const: bark
+        base_url:
+          type: string
+          format: uri
+        device_key:
+          type: string
+          pattern: "^[A-Za-z0-9]{1,64}$"
     BarkUrlsApiResponse:
       type: object
       additionalProperties: false
