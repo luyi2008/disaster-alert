@@ -140,7 +140,7 @@ async fn lookup_subscriptions(
     .await;
     match result {
         Ok(Ok(subscriptions)) if subscriptions.is_empty() => (
-            StatusCode::NOT_FOUND,
+            StatusCode::OK,
             Json(ApiResponse::<SubscriptionsResponse>::error(
                 "订阅不存在或已取消",
             )),
@@ -364,7 +364,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lookup_returns_not_found_after_unsubscribe() -> anyhow::Result<()> {
+    async fn lookup_returns_ok_with_success_false_after_unsubscribe() -> anyhow::Result<()> {
         let harness = harness()?;
         let value = subscription("abc123", "https://api.day.app", "home");
         harness
@@ -384,7 +384,7 @@ mod tests {
         )
         .await
         .into_response();
-        anyhow::ensure!(lookup.status() == StatusCode::NOT_FOUND);
+        anyhow::ensure!(lookup.status() == StatusCode::OK);
         let body = json_body(lookup).await?;
         anyhow::ensure!(body["success"] == false);
         anyhow::ensure!(body["message"] == "订阅不存在或已取消");
@@ -474,7 +474,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn bearer_lookup_returns_not_found_after_unsubscribe() -> anyhow::Result<()> {
+    async fn bearer_lookup_returns_ok_with_success_false_after_unsubscribe() -> anyhow::Result<()> {
         let harness = harness()?;
         let value = subscription("abc123", "https://api.day.app", "home");
         harness
@@ -489,7 +489,21 @@ mod tests {
         let lookup = subscriptions_handler(State(harness.state), bearer_headers("abc123")?)
             .await
             .into_response();
-        anyhow::ensure!(lookup.status() == StatusCode::NOT_FOUND);
+        anyhow::ensure!(lookup.status() == StatusCode::OK);
+        let body = json_body(lookup).await?;
+        anyhow::ensure!(body["success"] == false);
+        anyhow::ensure!(body["message"] == "订阅不存在或已取消");
+        anyhow::ensure!(body["data"].is_null());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bearer_lookup_returns_ok_with_success_false_for_unknown_key() -> anyhow::Result<()> {
+        let harness = harness()?;
+        let lookup = subscriptions_handler(State(harness.state), bearer_headers("unknownkey")?)
+            .await
+            .into_response();
+        anyhow::ensure!(lookup.status() == StatusCode::OK);
         let body = json_body(lookup).await?;
         anyhow::ensure!(body["success"] == false);
         anyhow::ensure!(body["message"] == "订阅不存在或已取消");
