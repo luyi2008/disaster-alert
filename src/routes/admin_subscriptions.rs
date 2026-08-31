@@ -392,6 +392,25 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn admin_lookup_returns_ok_with_success_false_for_unknown_key() -> anyhow::Result<()> {
+        let harness = harness()?;
+        let lookup = admin_subscriptions_handler(
+            State(harness.state),
+            Ok(Query(AdminSubscriptionQuery {
+                device_key: "unknownkey".to_string(),
+            })),
+        )
+        .await
+        .into_response();
+        anyhow::ensure!(lookup.status() == StatusCode::OK);
+        let body = json_body(lookup).await?;
+        anyhow::ensure!(body["success"] == false);
+        anyhow::ensure!(body["message"] == "订阅不存在或已取消");
+        anyhow::ensure!(body["data"].is_null());
+        Ok(())
+    }
+
     #[test]
     fn missing_or_invalid_device_key_is_rejected() -> anyhow::Result<()> {
         let uri = axum::http::Uri::from_static("/api/admin/subscriptions");
