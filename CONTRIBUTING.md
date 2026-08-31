@@ -115,8 +115,9 @@ docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 
 这个项目会保存 Bark Key、监测地点和通知级别，任何相关改动都要先确认下面几条约束：
 
-- 用户面只允许通过 `POST /api/subscribe` 创建或覆盖订阅，通过 `DELETE /api/unsubscribe` 删除订阅
+- 用户面只允许通过 `POST /api/subscribe` 创建或覆盖订阅，通过 `GET /api/subscriptions` 读取**调用方自己的**激活订阅，通过 `DELETE /api/unsubscribe` 删除订阅
 - `POST /api/simulate` 与 `GET /api/history` 是旁路测试口：只对 Bearer 或 `device_ID_list` 中的已存订阅调用 Bark，**不**进入 `EventRuntime` / inbox / 匹配 / 投递账本，也**不**对全站扇出。不要求 `INSTANCE_TERMS_ACCEPTED`。真实 Bark Key 不得写入测试、文档或提交。架构与测试方法见 [docs/simulate.md](docs/simulate.md)
+- `GET /api/subscriptions` 用 `Authorization: Bearer` Bark Key 返回该 Key 当前激活的地点和规则。不得接受空 Key，也不得列出其他设备。已取消或仅待确认的订阅返回 404。不要求 `INSTANCE_TERMS_ACCEPTED`
 - `GET /api/deliveries` 用同一套 Bearer Bark Key 读取**调用方自己的**投递账本（成功送达的直播灾害通知）。不得接受空 Key，也不得列出其他设备的记录。不包含模拟旁路、订阅确认通知或失败/重试中的投递。取消订阅后，在账本保留期内仍可查询
 - 另有未写入 README / OpenAPI 的运营只读接口：列出当前激活订阅的 Bark Key、按 Key 返回地点和规则、查询投递账本（`device_key` 可空，空则返回全部成功投递，每条含 Bark Key 与事件内容），以及列出保留期内已接入灾害的事件详情（`GET /api/admin/events`）。当前无鉴权，后续补上；不要把这些路径写进用户文档
 - 退订接口只返回操作结果，不回显订阅内容

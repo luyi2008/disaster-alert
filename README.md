@@ -248,6 +248,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 - 不要在日志、截图、Issue 或测试数据中使用真实 Bark Key、用户位置或通知详情 URL
 - 修改 `ALERT_SIGNING_KEY` 后，之前发送的详情链接会失效
 - 统计接口只返回聚合数量
+- `GET /api/subscriptions` 只返回当前 Bearer Bark Key 自己的激活订阅，不列出其他设备
 - `GET /api/deliveries` 只返回当前 Bearer Bark Key 自己的成功投递记录，不列出其他设备
 
 ## 使用与部署责任
@@ -269,6 +270,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `POST` | `/api/subscribe` | 创建或覆盖订阅 |
+| `GET` | `/api/subscriptions` | 只查当前 Bearer Bark Key 的激活订阅，不能查其他设备 |
 | `DELETE` | `/api/unsubscribe` | 删除订阅 |
 | `GET` | `/api/bark-urls` | 获取可用的 Bark 服务地址 |
 | `GET` | `/api/subscription-options` | 获取灾种、来源和默认规则 |

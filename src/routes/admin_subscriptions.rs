@@ -3,10 +3,12 @@ use crate::routes::{AppState, validate_device_key};
 use axum::{
     Json,
     extract::{Query, State, rejection::QueryRejection},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode, header::AUTHORIZATION},
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
+
+const AUTH_FAILED_MESSAGE: &str = "Bark Key 验证失败";
 
 #[derive(Serialize)]
 struct DeviceKeysResponse {
@@ -75,6 +77,27 @@ pub(crate) async fn admin_device_keys_handler(State(state): State<AppState>) -> 
     }
 }
 
+pub(crate) async fn subscriptions_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let device_key = match require_bearer(&headers) {
+        Ok(device_key) => device_key,
+        Err((status, message)) => {
+            return (
+                status,
+                Json(ApiResponse::<SubscriptionsResponse>::error(message)),
+            );
+        }
+    };
+    tracing::info!(
+        event = "subscription.lookup_requested",
+        device_key = %mask_device_key(&device_key),
+        "subscription.lookup_requested"
+    );
+    lookup_subscriptions(state, device_key).await
+}
+
 pub(crate) async fn admin_subscriptions_handler(
     State(state): State<AppState>,
     query: Result<Query<AdminSubscriptionQuery>, QueryRejection>,
@@ -93,6 +116,13 @@ pub(crate) async fn admin_subscriptions_handler(
         device_key = %mask_device_key(&device_key),
         "subscription.admin_lookup_requested"
     );
+    lookup_subscriptions(state, device_key).await
+}
+
+async fn lookup_subscriptions(
+    state: AppState,
+    device_key: String,
+) -> (StatusCode, Json<ApiResponse<SubscriptionsResponse>>) {
     let Ok(permit) = state.storage_concurrency.clone().try_acquire_owned() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -124,10 +154,10 @@ pub(crate) async fn admin_subscriptions_handler(
         ),
         Ok(Err(error)) => {
             tracing::error!(
-                event = "subscription.admin_lookup_failed",
+                event = "subscription.lookup_failed",
                 device_key = %mask_device_key(&device_key),
                 error = ?error,
-                "subscription.admin_lookup_failed"
+                "subscription.lookup_failed"
             );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -138,10 +168,10 @@ pub(crate) async fn admin_subscriptions_handler(
         }
         Err(error) => {
             tracing::error!(
-                event = "subscription.admin_lookup_task_failed",
+                event = "subscription.lookup_task_failed",
                 device_key = %mask_device_key(&device_key),
                 error = ?error,
-                "subscription.admin_lookup_task_failed"
+                "subscription.lookup_task_failed"
             );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -161,11 +191,31 @@ fn parse_admin_subscription_query(
     validate_device_key(&query.device_key)
 }
 
+fn require_bearer(headers: &HeaderMap) -> Result<String, (StatusCode, String)> {
+    let Some(value) = headers.get(AUTHORIZATION) else {
+        return Err((StatusCode::UNAUTHORIZED, AUTH_FAILED_MESSAGE.to_string()));
+    };
+    let Ok(text) = value.to_str() else {
+        return Err((StatusCode::UNAUTHORIZED, AUTH_FAILED_MESSAGE.to_string()));
+    };
+    let trimmed = text.trim();
+    let Some((scheme, rest)) = trimmed.split_once(' ') else {
+        return Err((StatusCode::UNAUTHORIZED, AUTH_FAILED_MESSAGE.to_string()));
+    };
+    if !scheme.eq_ignore_ascii_case("Bearer") {
+        return Err((StatusCode::UNAUTHORIZED, AUTH_FAILED_MESSAGE.to_string()));
+    }
+    match validate_device_key(rest.trim()) {
+        Ok(device_key) => Ok(device_key),
+        Err(_) => Err((StatusCode::UNAUTHORIZED, AUTH_FAILED_MESSAGE.to_string())),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         AdminSubscriptionQuery, admin_device_keys_handler, admin_subscriptions_handler,
-        parse_admin_subscription_query,
+        parse_admin_subscription_query, subscriptions_handler,
     };
     use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
     use crate::models::{
@@ -180,7 +230,7 @@ mod tests {
     use axum::{
         body::to_bytes,
         extract::{Query, State},
-        http::StatusCode,
+        http::{HeaderMap, HeaderValue, StatusCode, header::AUTHORIZATION},
         response::IntoResponse,
     };
     use serde_json::Value;
@@ -241,6 +291,15 @@ mod tests {
     async fn json_body(response: axum::response::Response) -> anyhow::Result<Value> {
         let body = to_bytes(response.into_body(), 64 * 1024).await?;
         Ok(serde_json::from_slice(&body)?)
+    }
+
+    fn bearer_headers(device_key: &str) -> anyhow::Result<HeaderMap> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {device_key}"))?,
+        );
+        Ok(headers)
     }
 
     #[tokio::test]
@@ -350,6 +409,91 @@ mod tests {
         };
         anyhow::ensure!(status == StatusCode::BAD_REQUEST);
         anyhow::ensure!(message == "Bark Key 只能包含字母、数字");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bearer_lookup_returns_active_subscriptions() -> anyhow::Result<()> {
+        let harness = harness()?;
+        harness
+            .state
+            .subscriptions
+            .upsert_subscription(subscription("abc123", "https://api.day.app", "home"))?;
+        harness
+            .state
+            .subscriptions
+            .upsert_subscription(subscription("abc123", "https://bark.example.com", "office"))?;
+        harness
+            .state
+            .subscriptions
+            .upsert_subscription(subscription("otherkey", "https://api.day.app", "other"))?;
+
+        let lookup = subscriptions_handler(State(harness.state), bearer_headers("abc123")?)
+            .await
+            .into_response();
+        anyhow::ensure!(lookup.status() == StatusCode::OK);
+        let lookup_body = json_body(lookup).await?;
+        anyhow::ensure!(lookup_body["success"] == true);
+        anyhow::ensure!(lookup_body["message"] == "订阅详情获取成功");
+        let subscriptions = lookup_body["data"]["subscriptions"]
+            .as_array()
+            .context("missing subscriptions array")?;
+        anyhow::ensure!(subscriptions.len() == 2);
+        anyhow::ensure!(
+            subscriptions
+                .iter()
+                .all(|item| item["destination"]["device_key"] == "abc123")
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_bearer_is_unauthorized() -> anyhow::Result<()> {
+        let harness = harness()?;
+        let response = subscriptions_handler(State(harness.state), HeaderMap::new())
+            .await
+            .into_response();
+        anyhow::ensure!(response.status() == StatusCode::UNAUTHORIZED);
+        let body = json_body(response).await?;
+        anyhow::ensure!(body["success"] == false);
+        anyhow::ensure!(body["message"] == "Bark Key 验证失败");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn invalid_bearer_is_unauthorized() -> anyhow::Result<()> {
+        let harness = harness()?;
+        let response = subscriptions_handler(State(harness.state), bearer_headers("bad key")?)
+            .await
+            .into_response();
+        anyhow::ensure!(response.status() == StatusCode::UNAUTHORIZED);
+        let body = json_body(response).await?;
+        anyhow::ensure!(body["success"] == false);
+        anyhow::ensure!(body["message"] == "Bark Key 验证失败");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn bearer_lookup_returns_not_found_after_unsubscribe() -> anyhow::Result<()> {
+        let harness = harness()?;
+        let value = subscription("abc123", "https://api.day.app", "home");
+        harness
+            .state
+            .subscriptions
+            .upsert_subscription(value.clone())?;
+        harness
+            .state
+            .subscriptions
+            .delete_subscription(&value.destination_id())?;
+
+        let lookup = subscriptions_handler(State(harness.state), bearer_headers("abc123")?)
+            .await
+            .into_response();
+        anyhow::ensure!(lookup.status() == StatusCode::NOT_FOUND);
+        let body = json_body(lookup).await?;
+        anyhow::ensure!(body["success"] == false);
+        anyhow::ensure!(body["message"] == "订阅不存在或已取消");
+        anyhow::ensure!(body["data"].is_null());
         Ok(())
     }
 }

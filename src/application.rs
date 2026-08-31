@@ -7,7 +7,7 @@ use crate::routes::{
     admin_events_handler, admin_subscriptions_handler, bark_urls_handler, deliveries_handler,
     health_handler, history_handler, incident_detail_handler, reverse_geocode_handler,
     simulate_handler, status_handler, subscribe_handler, subscription_options_handler,
-    unsubscribe_handler,
+    subscriptions_handler, unsubscribe_handler,
 };
 use crate::runtime::{EventRuntime, RuntimeStatus};
 use crate::storage::{RetentionPolicy, Storage};
@@ -174,6 +174,7 @@ async fn run() -> Result<()> {
         )
         .route("/api/history", get(history_handler))
         .route("/api/deliveries", get(deliveries_handler))
+        .route("/api/subscriptions", get(subscriptions_handler))
         .route("/api/admin/device-keys", get(admin_device_keys_handler))
         .route("/api/admin/subscriptions", get(admin_subscriptions_handler))
         .route("/api/admin/deliveries", get(admin_deliveries_handler))
