@@ -8,9 +8,9 @@
 
 **有**
 
-- `Authorization: Bearer <device_key>` 鉴权（字符集与长度规则与订阅接口相同）
+- `Authorization: Bearer <BFF_SERVICE_TOKEN>` 鉴权（与 Bark 设备 Key、用户 cookie 都不是同一种凭据）
 - 按模式合成假震中，或回放内置历史目录，只对显式目标设备调用 Bark
-- 可选 JSON `device_ID_list` 限制推送对象
+- JSON `device_ID_list` 指定推送对象（必填）
 
 **无**
 
@@ -75,8 +75,9 @@ flowchart LR
 
 ### 推送目标
 
-- 空 body（或 `{}`）：只推当前 Bearer 这一把 Key。该 Key 在本实例没有已激活、也没有待确认订阅 → 404。
-- 可选 JSON `{ "device_ID_list": ["keyA", "keyB"] }`（`deny_unknown_fields`，最多 32 个，空数组 → 400「device_ID_list 不能为空」）。只推列表中的 Key，不会额外广播给其他订阅者。列表里没有订阅的 Key 记入 `skipped`，整次请求仍 200。
+- 必须 JSON `{ "device_ID_list": ["keyA", "keyB"] }`（`deny_unknown_fields`，最多 32 个）。只推列表中的 Key，不会额外广播给其他订阅者。列表里没有订阅的 Key 记入 `skipped`，整次请求仍 200。
+- 空 body、`{}` 或省略 `device_ID_list` → 400「需要 device_ID_list」。空数组 → 400「device_ID_list 不能为空」。
+- `Authorization: Bearer <bark token>`（而不是服务凭证）→ 401「服务凭证无效」。
 
 `GET /api/history?source=major` 公开只读，返回上述三条目录。带有效 Bearer 时，按该 Key 已存监测点标注 `distance_km`、`hypocentral_km`、`estimated_intensity`。
 
@@ -87,7 +88,7 @@ flowchart LR
 1. 忽略 ASCII 大小写匹配 **已激活** 订阅
 2. 若没有，取该 Key 最新一条 **待确认** 订阅
 
-空 body 且两步都没有命中 → 404「未找到该 Bark Key 的已激活订阅，请先 POST /api/subscribe」。
+空列表或未命中的 Key 记入 `skipped`，不再用 404 表示「当前 Bearer 没有订阅」。
 
 404 表示**本实例**的存储里没有这份订阅。其它站点（saevio、网页草稿、另一套 `DB_PATH`）里的 Key 不算。
 
@@ -114,19 +115,21 @@ cargo test --lib simulate
 | `simulated_event_hits_the_requested_notify_band` | 三个 `notify_level` 都能打中对应中断带，且 `training` |
 | `historical_event_keeps_catalog_coordinates` | 宜宾坐标与震级，且非 `training` |
 | `yibin_preview_matches_chengdu_distance_scale` | 成都监测点到宜宾约 230–250 km |
-| `resolve_device_keys_defaults_to_bearer_and_rejects_empty_list` | 空 body 用 Bearer；空列表拒绝 |
+| `resolve_device_keys_requires_a_non_empty_list` | 省略列表为 `Missing`；空列表拒绝；重复 Key 去重 |
 
 ### 路由测试（mock Bark）
 
 | 测试 | 断言 |
 | --- | --- |
-| `simulate_without_bearer_fails` | 无 Authorization → 401「Bark Key 验证失败」，mock 无 POST |
-| `unknown_bearer_key_is_not_found` | 未知 Key → 404，mock 无 POST |
+| `simulate_without_bearer_fails` | 无 Authorization → 401「服务凭证无效」，mock 无 POST |
+| `simulate_with_bark_bearer_fails` | Bark Key 当 Bearer → 401「服务凭证无效」，mock 无 POST |
+| `simulate_without_device_list_is_bad_request` | 有服务凭证但空 body → 400「需要 device_ID_list」 |
+| `unknown_listed_key_is_skipped` | 列表里未知 Key → 200 且 `skipped=1`，mock 无 POST |
 | `bearer_key_matches_stored_subscription_case_insensitively` | `TARGETKEY` 命中已存 `targetKey` |
 | `pending_confirmation_can_receive_simulate_push` | 待确认订阅可推 |
 | `empty_device_list_is_bad_request` | `device_ID_list: []` → 400 |
 | `simulate_modes_are_mutually_exclusive` | 两模式都给/都不给 → 400；未知历史 key → 404；`source=cenc` → 400 |
-| `bearer_only_pushes_the_current_key` | 只打 Bearer；`inbox` / `match_jobs` / `delivery_batches` 均为 0 |
+| `bearer_only_pushes_the_current_key` | 列表仅当前 Key；`inbox` / `match_jobs` / `delivery_batches` 均为 0 |
 | `device_list_does_not_fan_out_to_other_subscribers` | 列表含缺失 Key → `pushed=1, skipped=1`，第二把订阅不被打到 |
 | `history_replay_uses_catalog_event_id` | `event_id` 前缀 `HIST-MAJOR-CENC-202606290012-` |
 | `history_catalog_is_public_and_can_annotate_a_subscription` | 无 Bearer 无距离；带 Bearer 才有 `distance_km` |
@@ -134,7 +137,7 @@ cargo test --lib simulate
 
 ## 手动测试
 
-默认监听 `http://127.0.0.1:30010`。先 `cp .env.example .env`，填写 `ALERT_SIGNING_KEY`，并设 `INSTANCE_TERMS_ACCEPTED=true`（否则无法订阅）。不要让 Docker 与本机 `cargo run` 共用同一 `DB_PATH` 却打错端口。
+默认监听 `http://127.0.0.1:30010`。先 `cp .env.example .env`，填写 `ALERT_SIGNING_KEY` 与 `BFF_SERVICE_TOKEN`，并设 `INSTANCE_TERMS_ACCEPTED=true`（否则无法订阅）。不要让 Docker 与本机 `cargo run` 共用同一 `DB_PATH` 却打错端口。
 
 用**本实例**刚订阅成功的同一把 Key（下面用 `yourBarkKey` 占位，换成你的测试 Key，不要把真实 Key 提交进仓库）：
 
@@ -144,15 +147,19 @@ curl -sS "http://127.0.0.1:30010/api/status"
 
 # Mode A：按中断级别合成假震中
 curl -sS -X POST "http://127.0.0.1:30010/api/simulate?notify_level=active" \
-  -H "Authorization: Bearer yourBarkKey"
+  -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"device_ID_list":["yourBarkKey"]}'
 
 # Mode B：回放宜宾高县
 curl -sS -X POST "http://127.0.0.1:30010/api/simulate?source=major&key=yibin-gaoxian-2026" \
-  -H "Authorization: Bearer yourBarkKey"
+  -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"device_ID_list":["yourBarkKey"]}'
 
 # 只对列表中的 Key 推送（列表里没有订阅的记 skipped）
 curl -sS -X POST "http://127.0.0.1:30010/api/simulate?notify_level=critical" \
-  -H "Authorization: Bearer yourBarkKey" \
+  -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"device_ID_list":["yourBarkKey"]}'
 
@@ -168,8 +175,8 @@ curl -sS "http://127.0.0.1:30010/api/history?source=major" \
 
 | 现象 | 含义 |
 | --- | --- |
-| 401「Bark Key 验证失败」 | 缺少或格式无效的 Bearer |
-| 404「未找到该 Bark Key 的已激活订阅…」 | 本实例没有该 Key 的已激活或待确认订阅 |
+| 401「服务凭证无效」 | 缺少、错误或把 Bark Key 当成写接口 Bearer |
+| 400「需要 device_ID_list」 | 写模拟口未带设备列表 |
 | 404「未找到该历史地震」 | `source=major` 但 `key` 不在内置目录 |
 | 400「不支持的历史目录」 | `source` 不是 `major` |
 | 400「查询参数无效」/ 模式相关文案 | `notify_level` 与 `source`/`key` 同时出现或同时缺失 |

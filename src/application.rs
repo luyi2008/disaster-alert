@@ -137,7 +137,8 @@ async fn run() -> Result<()> {
     )
     .with_instance_terms_accepted(config.instance_terms_accepted)
     .with_huania_enabled(config.huania_enabled)
-    .with_wave_speeds(config.p_wave_km_s, config.s_wave_km_s);
+    .with_wave_speeds(config.p_wave_km_s, config.s_wave_km_s)
+    .with_bff_service_token(config.bff_service_token.clone());
     if pruned_contexts > 0 {
         tracing::info!(
             event = "database.notification_contexts_pruned",
