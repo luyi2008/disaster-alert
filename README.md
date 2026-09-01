@@ -49,6 +49,7 @@ openssl rand 32 | base64 | tr '+/' '-_' | tr -d '=\n'
 ```dotenv
 ALERT_DETAIL_BASE_URL=https://alerts.example.com
 ALERT_SIGNING_KEY=生成的私钥
+BFF_SERVICE_TOKEN=生成的长随机服务凭证
 ```
 
 阅读[使用与部署责任](#使用与部署责任)后，如确认接受实例运营责任，再设置：
@@ -196,6 +197,7 @@ docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 | `BARK_CALL` | `true` | 是否为非静默灾害通知启用 Bark 通话级提醒 |
 | `ALERT_DETAIL_BASE_URL` | 必填 | Bark 客户端能够访问的通知详情页根地址，部署时使用 HTTPS |
 | `ALERT_SIGNING_KEY` | 必填 | 32 字节、无填充的 URL-safe Base64 私钥 |
+| `BFF_SERVICE_TOKEN` | 必填 | BFF 调用写接口（`POST /api/subscribe`、`DELETE /api/unsubscribe`、`POST /api/simulate`）时放在 `Authorization: Bearer` 里的共享服务凭证。浏览器不得再用 Bark token 当写凭证 |
 
 `BARK_URL_ALLOWLIST` 支持域名、IP、端口和反向代理子路径，例如：
 
@@ -250,6 +252,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 - 统计接口只返回聚合数量
 - `GET /api/subscriptions` 只返回当前 Bearer Bark Key 自己的激活订阅，不列出其他设备
 - `GET /api/deliveries` 只返回当前 Bearer Bark Key 自己的成功投递记录，不列出其他设备
+- `POST /api/subscribe`、`DELETE /api/unsubscribe`、`POST /api/simulate` 只接受 `Authorization: Bearer <BFF_SERVICE_TOKEN>`，拒绝把 Bark token 当写凭证
 
 ## 使用与部署责任
 
