@@ -162,9 +162,10 @@ Bark token 是账号资产，不是登录凭据。产品文案用「设备 / Bar
 
 BFF 使用 SQLite（单 ECS 单实例）。Better Auth 表：user、account、session、verification。另建设备表：
 
-- `id`：主键，供 URL `/devices/:id` 使用
+- `id`：主键（UUID），供 URL `/devices/:id` 使用
 - `user_id`
-- `token`：AES-256-GCM 加密存放，密钥为环境变量 `DEVICE_TOKEN_ENCRYPTION_KEY`
+- `token_ciphertext`：AES-256-GCM 加密存放，密钥为环境变量 `DEVICE_TOKEN_ENCRYPTION_KEY`
+- `token_hash`：HMAC-SHA256（同一密钥），用于全局唯一约束和查找；密文带随机 nonce，不能当唯一键
 - `name`
 - `created_at` / `updated_at`
 
@@ -206,3 +207,23 @@ Rust：无 BFF 凭证的写订阅被拒；有凭证时现有订阅/匹配/推送
 4. 反代与部署：三个容器，cookie 同域。
 
 匹配、数据源、Bark 推送内容格式不在本设计内修改。
+
+## 11. BFF 工程架构
+
+独立仓库 `disaster-alert-bff`。一个 Node 进程：**Hono + Better Auth + SQLite（better-sqlite3 / Kysely）**。不引入 Next、Nest、Prisma。测试 Vitest，对 `app.request()` 发请求。监听 `30012`，避免和 API `30010`、网页 `30011` 冲突。
+
+| 路径 | 职责 |
+| --- | --- |
+| `src/app.ts` | 组装路由、CORS、session 中间件 |
+| `src/server.ts` | 读配置、listen |
+| `src/auth/index.ts` | betterAuth：`phoneNumber` + 可选 wechat，`basePath` `/api/auth` |
+| `src/devices/` | 资产表与 `/api/devices` |
+| `src/subscribe-proxy/` | cookie → 设备 → 带服务凭证调 Rust |
+| `src/settings/` | 补绑手机 / 微信 |
+| `src/bark/register.ts` | `GET {BARK_BASE_URL}/register/{token}` |
+| `src/sms/` | 真短信或 mock |
+| `src/wechat/` | mock 扫码票据；真扫码走 Better Auth wechat |
+| `src/rust/client.ts` | 内网 HTTP JSON |
+| `src/crypto/device-token.ts` | AES-256-GCM 与 HMAC |
+
+生产与网页同域反代，cookie `SameSite=Lax`。开发时 Vite 把 `/api/auth`、`/api/devices`、订阅读写代理到 BFF，公开只读仍代理到 Rust。
