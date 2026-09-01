@@ -19,7 +19,7 @@ use axum::{
         Query, State,
         rejection::{JsonRejection, QueryRejection},
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,7 @@ pub(crate) struct AppState {
     subscription_concurrency: Arc<Semaphore>,
     subscription_confirmations: SubscriptionConfirmationService,
     huania_enabled: bool,
+    bff_service_token: crate::config::SecretString,
 }
 
 impl AppState {
@@ -84,6 +85,9 @@ impl AppState {
             subscription_concurrency: Arc::new(Semaphore::new(16)),
             subscription_confirmations,
             huania_enabled: false,
+            bff_service_token: crate::config::SecretString::new(
+                "test-bff-service-token".to_string(),
+            ),
         }
     }
 
@@ -100,6 +104,11 @@ impl AppState {
     pub(crate) fn with_wave_speeds(mut self, p_wave_km_s: f64, s_wave_km_s: f64) -> Self {
         self.p_wave_km_s = p_wave_km_s;
         self.s_wave_km_s = s_wave_km_s;
+        self
+    }
+
+    pub(crate) fn with_bff_service_token(mut self, token: crate::config::SecretString) -> Self {
+        self.bff_service_token = token;
         self
     }
 }
@@ -163,8 +172,17 @@ fn parse_reverse_geocode_query(
 
 pub(crate) async fn subscribe_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     payload: Result<Json<SubscribeRequest>, JsonRejection>,
 ) -> impl IntoResponse {
+    if let Err((status, message)) =
+        crate::routes::bff_auth::require_bff_service_token(&headers, state.bff_service_token.expose())
+    {
+        return (
+            status,
+            Json(ApiResponse::<SubscribeResponse>::error(message)),
+        );
+    }
     if let Err(response) = require_subscription_creation_enabled(state.instance_terms_accepted) {
         return response;
     }
@@ -363,8 +381,14 @@ pub(crate) async fn subscription_options_handler(
 
 pub(crate) async fn unsubscribe_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     payload: Result<Json<UnsubscribeRequest>, JsonRejection>,
 ) -> impl IntoResponse {
+    if let Err((status, message)) =
+        crate::routes::bff_auth::require_bff_service_token(&headers, state.bff_service_token.expose())
+    {
+        return (status, Json(ApiResponse::<()>::error(message)));
+    }
     let Json(payload) = match payload {
         Ok(payload) => payload,
         Err(_) => {
@@ -611,6 +635,14 @@ pub(crate) async fn status_handler(State(state): State<AppState>) -> impl IntoRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
+    use crate::storage::Storage;
+    use crate::subscriptions::SubscriptionConfirmationService;
+    use axum::{
+        body::to_bytes,
+        http::{HeaderMap, HeaderValue, header::AUTHORIZATION},
+        response::IntoResponse,
+    };
 
     fn request() -> SubscribeRequest {
         SubscribeRequest {
@@ -716,5 +748,112 @@ mod tests {
         assert!(value.get("fanstudio").is_some());
         assert!(value.get("huania").is_some());
         assert!(value.get("runtime").is_none());
+    }
+
+    fn bff_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-bff-service-token"),
+        );
+        headers
+    }
+
+    fn bark_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer abc123"));
+        headers
+    }
+
+    fn test_state(terms_accepted: bool) -> anyhow::Result<(AppState, tempfile::TempDir)> {
+        let directory = tempfile::tempdir()?;
+        let storage = Storage::open(directory.path())?;
+        let notifier = BarkNotifier::new(
+            vec!["https://api.day.app".to_string()],
+            2,
+            4,
+            BarkPushConfig::new(None, 10, "test".to_string(), false),
+        )?;
+        let links = NotificationLinkService::for_test(&storage);
+        let confirmations = SubscriptionConfirmationService::new(
+            storage.subscription_manager(),
+            notifier.clone(),
+            1,
+        );
+        let state = AppState::new(
+            storage,
+            notifier,
+            RuntimeStatus::default(),
+            ReverseGeocoder::disabled(),
+            links,
+            confirmations,
+            4,
+        )
+        .with_instance_terms_accepted(terms_accepted);
+        Ok((state, directory))
+    }
+
+    async fn json_body(
+        response: axum::response::Response,
+    ) -> anyhow::Result<(StatusCode, serde_json::Value)> {
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 64 * 1024).await?;
+        Ok((status, serde_json::from_slice(&body)?))
+    }
+
+    #[tokio::test]
+    async fn subscribe_without_service_token_is_unauthorized() -> anyhow::Result<()> {
+        let (state, _directory) = test_state(true)?;
+        let response = subscribe_handler(State(state), HeaderMap::new(), Ok(Json(request())))
+            .await
+            .into_response();
+        let (status, body) = json_body(response).await?;
+        anyhow::ensure!(status == StatusCode::UNAUTHORIZED);
+        anyhow::ensure!(body["success"] == false);
+        anyhow::ensure!(body["message"] == "服务凭证无效");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn subscribe_with_bark_bearer_is_unauthorized() -> anyhow::Result<()> {
+        let (state, _directory) = test_state(true)?;
+        let response = subscribe_handler(State(state), bark_headers(), Ok(Json(request())))
+            .await
+            .into_response();
+        let (status, body) = json_body(response).await?;
+        anyhow::ensure!(status == StatusCode::UNAUTHORIZED);
+        anyhow::ensure!(body["message"] == "服务凭证无效");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn subscribe_checks_instance_terms_after_service_token() -> anyhow::Result<()> {
+        let (state, _directory) = test_state(false)?;
+        let response = subscribe_handler(State(state), bff_headers(), Ok(Json(request())))
+            .await
+            .into_response();
+        let (status, body) = json_body(response).await?;
+        anyhow::ensure!(status == StatusCode::SERVICE_UNAVAILABLE);
+        anyhow::ensure!(body["message"] == INSTANCE_TERMS_REQUIRED_MESSAGE);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_without_service_token_is_unauthorized() -> anyhow::Result<()> {
+        let (state, _directory) = test_state(true)?;
+        let payload = UnsubscribeRequest {
+            destination: NotificationDestination::Bark {
+                base_url: "https://api.day.app".to_string(),
+                device_key: "abc123".to_string(),
+            },
+        };
+        let response =
+            unsubscribe_handler(State(state), HeaderMap::new(), Ok(Json(payload)))
+                .await
+                .into_response();
+        let (status, body) = json_body(response).await?;
+        anyhow::ensure!(status == StatusCode::UNAUTHORIZED);
+        anyhow::ensure!(body["message"] == "服务凭证无效");
+        Ok(())
     }
 }
