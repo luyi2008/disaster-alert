@@ -175,9 +175,10 @@ pub(crate) async fn subscribe_handler(
     headers: HeaderMap,
     payload: Result<Json<SubscribeRequest>, JsonRejection>,
 ) -> impl IntoResponse {
-    if let Err((status, message)) =
-        crate::routes::bff_auth::require_bff_service_token(&headers, state.bff_service_token.expose())
-    {
+    if let Err((status, message)) = crate::routes::bff_auth::require_bff_service_token(
+        &headers,
+        state.bff_service_token.expose(),
+    ) {
         return (
             status,
             Json(ApiResponse::<SubscribeResponse>::error(message)),
@@ -384,9 +385,10 @@ pub(crate) async fn unsubscribe_handler(
     headers: HeaderMap,
     payload: Result<Json<UnsubscribeRequest>, JsonRejection>,
 ) -> impl IntoResponse {
-    if let Err((status, message)) =
-        crate::routes::bff_auth::require_bff_service_token(&headers, state.bff_service_token.expose())
-    {
+    if let Err((status, message)) = crate::routes::bff_auth::require_bff_service_token(
+        &headers,
+        state.bff_service_token.expose(),
+    ) {
         return (status, Json(ApiResponse::<()>::error(message)));
     }
     let Json(payload) = match payload {
@@ -847,10 +849,9 @@ mod tests {
                 device_key: "abc123".to_string(),
             },
         };
-        let response =
-            unsubscribe_handler(State(state), HeaderMap::new(), Ok(Json(payload)))
-                .await
-                .into_response();
+        let response = unsubscribe_handler(State(state), HeaderMap::new(), Ok(Json(payload)))
+            .await
+            .into_response();
         let (status, body) = json_body(response).await?;
         anyhow::ensure!(status == StatusCode::UNAUTHORIZED);
         anyhow::ensure!(body["message"] == "服务凭证无效");

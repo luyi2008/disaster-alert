@@ -6,7 +6,12 @@ pub(crate) fn require_bff_service_token(
     headers: &HeaderMap,
     expected: &str,
 ) -> Result<(), (StatusCode, String)> {
-    let failed = || (StatusCode::UNAUTHORIZED, BFF_AUTH_FAILED_MESSAGE.to_string());
+    let failed = || {
+        (
+            StatusCode::UNAUTHORIZED,
+            BFF_AUTH_FAILED_MESSAGE.to_string(),
+        )
+    };
     let Some(value) = headers.get(AUTHORIZATION) else {
         return Err(failed());
     };
@@ -45,10 +50,10 @@ mod tests {
 
     fn bearer(value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {value}")).expect("header"),
-        );
+        let header = format!("Bearer {value}");
+        if let Ok(value) = HeaderValue::from_str(&header) {
+            headers.insert(AUTHORIZATION, value);
+        }
         headers
     }
 
@@ -57,7 +62,10 @@ mod tests {
         let error = require_bff_service_token(&HeaderMap::new(), "expected-token").err();
         assert_eq!(
             error,
-            Some((StatusCode::UNAUTHORIZED, BFF_AUTH_FAILED_MESSAGE.to_string()))
+            Some((
+                StatusCode::UNAUTHORIZED,
+                BFF_AUTH_FAILED_MESSAGE.to_string()
+            ))
         );
     }
 
@@ -66,7 +74,10 @@ mod tests {
         let error = require_bff_service_token(&bearer("abc123"), "expected-token").err();
         assert_eq!(
             error,
-            Some((StatusCode::UNAUTHORIZED, BFF_AUTH_FAILED_MESSAGE.to_string()))
+            Some((
+                StatusCode::UNAUTHORIZED,
+                BFF_AUTH_FAILED_MESSAGE.to_string()
+            ))
         );
     }
 
@@ -94,7 +105,10 @@ mod tests {
             require_bff_service_token(&bearer("expected-token-extra"), "expected-token").err();
         assert_eq!(
             error,
-            Some((StatusCode::UNAUTHORIZED, BFF_AUTH_FAILED_MESSAGE.to_string()))
+            Some((
+                StatusCode::UNAUTHORIZED,
+                BFF_AUTH_FAILED_MESSAGE.to_string()
+            ))
         );
     }
 }

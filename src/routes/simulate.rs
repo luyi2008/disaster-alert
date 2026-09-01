@@ -453,7 +453,9 @@ mod tests {
     }
 
     fn device_list_body(keys: &[&str]) -> Bytes {
-        Bytes::from(serde_json::to_vec(&serde_json::json!({ "device_ID_list": keys })).unwrap_or_default())
+        Bytes::from(
+            serde_json::to_vec(&serde_json::json!({ "device_ID_list": keys })).unwrap_or_default(),
+        )
     }
 
     fn bearer_headers(device_key: &str) -> anyhow::Result<HeaderMap> {
