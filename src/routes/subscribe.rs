@@ -49,7 +49,7 @@ pub(crate) struct AppState {
     subscription_concurrency: Arc<Semaphore>,
     subscription_confirmations: SubscriptionConfirmationService,
     huania_enabled: bool,
-    bff_service_token: crate::config::SecretString,
+    pub(crate) bff_service_token: crate::config::SecretString,
 }
 
 impl AppState {
