@@ -61,12 +61,12 @@ pub(crate) async fn simulate_handler(
     query: Result<Query<SimulateQuery>, QueryRejection>,
     body: Bytes,
 ) -> impl IntoResponse {
-    let bearer_key = match require_bearer(&headers) {
-        Ok(value) => value,
-        Err((status, message)) => {
-            return (status, Json(ApiResponse::<SimulateData>::error(message)));
-        }
-    };
+    if let Err((status, message)) = crate::routes::bff_auth::require_bff_service_token(
+        &headers,
+        state.bff_service_token.expose(),
+    ) {
+        return (status, Json(ApiResponse::<SimulateData>::error(message)));
+    }
     let Query(query) = match query {
         Ok(query) => query,
         Err(_) => {
@@ -91,9 +91,14 @@ pub(crate) async fn simulate_handler(
             );
         }
     };
-    let listed_explicitly = device_list.is_some();
-    let device_keys = match resolve_device_keys(&bearer_key, device_list) {
+    let device_keys = match resolve_device_keys(device_list) {
         Ok(keys) => keys,
+        Err(DeviceListError::Missing) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiResponse::<SimulateData>::error("需要 device_ID_list")),
+            );
+        }
         Err(DeviceListError::Empty) => {
             return (
                 StatusCode::BAD_REQUEST,
@@ -119,31 +124,7 @@ pub(crate) async fn simulate_handler(
             );
         }
     };
-    if !listed_explicitly {
-        match lookup_subscriptions(&state, &bearer_key).await {
-            Ok(subscriptions) if subscriptions.is_empty() => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    Json(ApiResponse::<SimulateData>::error(
-                        "未找到该 Bark Key 的已激活订阅，请先 POST /api/subscribe",
-                    )),
-                );
-            }
-            Ok(_) => {}
-            Err(error) => {
-                tracing::error!(
-                    event = "simulate.subscription_lookup_failed",
-                    device_key = %mask_device_key(&bearer_key),
-                    error = ?error,
-                    "simulate.subscription_lookup_failed"
-                );
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ApiResponse::<SimulateData>::error("模拟推送暂时无法完成")),
-                );
-            }
-        }
-    }
+    let log_device_key = device_keys.first().map(String::as_str).unwrap_or_default();
 
     match dispatch(
         &state.subscriptions,
@@ -157,7 +138,7 @@ pub(crate) async fn simulate_handler(
     .await
     {
         Ok(outcome) => {
-            let message = success_message(&mode, listed_explicitly, device_keys.len());
+            let message = success_message(&mode, device_keys.len());
             (
                 StatusCode::OK,
                 Json(ApiResponse::success(message, Some(simulate_data(outcome)))),
@@ -166,7 +147,7 @@ pub(crate) async fn simulate_handler(
         Err(error) => {
             tracing::error!(
                 event = "simulate.dispatch_failed",
-                device_key = %mask_device_key(&bearer_key),
+                device_key = %mask_device_key(log_device_key),
                 error = ?error,
                 "simulate.dispatch_failed"
             );
@@ -285,11 +266,6 @@ fn parse_simulate_body(body: &Bytes) -> std::result::Result<Option<Vec<String>>,
     Ok(parsed.device_id_list)
 }
 
-fn require_bearer(headers: &HeaderMap) -> std::result::Result<String, (StatusCode, String)> {
-    optional_bearer(headers)?
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, AUTH_FAILED_MESSAGE.to_string()))
-}
-
 fn optional_bearer(
     headers: &HeaderMap,
 ) -> std::result::Result<Option<String>, (StatusCode, String)> {
@@ -323,14 +299,10 @@ async fn lookup_subscriptions(
         .map_err(anyhow::Error::from)?
 }
 
-fn success_message(
-    mode: &SimulateMode,
-    listed_explicitly: bool,
-    target_count: usize,
-) -> &'static str {
+fn success_message(mode: &SimulateMode, target_count: usize) -> &'static str {
     match mode {
         SimulateMode::History { .. } => "已使用历史真实地震数据发送测试预警",
-        SimulateMode::NotifyLevel(_) if listed_explicitly && target_count > 1 => "已发送模拟预警",
+        SimulateMode::NotifyLevel(_) if target_count > 1 => "已发送模拟预警",
         SimulateMode::NotifyLevel(_) => "已向当前 Bark Key 发送模拟预警",
     }
 }
@@ -358,7 +330,7 @@ fn nonempty(value: &Option<String>) -> Option<&str> {
 mod tests {
     use super::{
         HistoryQuery, SimulateQuery, history_handler, optional_bearer, parse_simulate_body,
-        parse_simulate_mode, require_bearer, simulate_handler,
+        parse_simulate_mode, simulate_handler,
     };
     use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
     use crate::models::{
@@ -471,6 +443,21 @@ mod tests {
         })
     }
 
+    fn bff_headers() -> anyhow::Result<HeaderMap> {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str("Bearer test-bff-service-token")?,
+        );
+        Ok(headers)
+    }
+
+    fn device_list_body(keys: &[&str]) -> Bytes {
+        Bytes::from(
+            serde_json::to_vec(&serde_json::json!({ "device_ID_list": keys })).unwrap_or_default(),
+        )
+    }
+
     fn bearer_headers(device_key: &str) -> anyhow::Result<HeaderMap> {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -518,11 +505,6 @@ mod tests {
 
     #[test]
     fn missing_authorization_is_a_bark_key_failure() {
-        let error = require_bearer(&HeaderMap::new()).err();
-        assert_eq!(
-            error,
-            Some((StatusCode::UNAUTHORIZED, "Bark Key 验证失败".to_string()))
-        );
         assert_eq!(optional_bearer(&HeaderMap::new()).ok(), Some(None));
     }
 
@@ -577,30 +559,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unknown_bearer_key_is_not_found() -> anyhow::Result<()> {
+    async fn unknown_listed_key_is_skipped() -> anyhow::Result<()> {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("unknownKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: Some("active".to_string()),
                 source: None,
                 key: None,
             })),
-            Bytes::new(),
+            device_list_body(&["unknownKey"]),
         )
         .await
         .into_response();
         let (status, body) = json_body(response).await?;
-        assert_eq!(status, StatusCode::NOT_FOUND);
-        assert_eq!(body["success"], false);
-        assert!(
-            body["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("订阅")),
-            "message {}",
-            body["message"]
-        );
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["success"], true);
+        assert_eq!(body["data"]["pushed"], 0);
+        assert_eq!(body["data"]["skipped"], 1);
         assert!(captured_keys(&harness)?.is_empty());
         Ok(())
     }
@@ -610,13 +587,13 @@ mod tests {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("TARGETKEY")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: Some("active".to_string()),
                 source: None,
                 key: None,
             })),
-            Bytes::new(),
+            device_list_body(&["TARGETKEY"]),
         )
         .await
         .into_response();
@@ -637,13 +614,13 @@ mod tests {
         )?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("pendingKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: Some("active".to_string()),
                 source: None,
                 key: None,
             })),
-            Bytes::new(),
+            device_list_body(&["pendingKey"]),
         )
         .await
         .into_response();
@@ -672,7 +649,51 @@ mod tests {
         let (status, body) = json_body(response).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["success"], false);
-        assert_eq!(body["message"], "Bark Key 验证失败");
+        assert_eq!(body["message"], "服务凭证无效");
+        assert!(captured_keys(&harness)?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn simulate_with_bark_bearer_fails() -> anyhow::Result<()> {
+        let harness = start_harness().await?;
+        let response = simulate_handler(
+            State(harness.state.clone()),
+            bearer_headers("targetKey")?,
+            Ok(Query(SimulateQuery {
+                notify_level: Some("active".to_string()),
+                source: None,
+                key: None,
+            })),
+            device_list_body(&["targetKey"]),
+        )
+        .await
+        .into_response();
+        let (status, body) = json_body(response).await?;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["message"], "服务凭证无效");
+        assert!(captured_keys(&harness)?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn simulate_without_device_list_is_bad_request() -> anyhow::Result<()> {
+        let harness = start_harness().await?;
+        let response = simulate_handler(
+            State(harness.state.clone()),
+            bff_headers()?,
+            Ok(Query(SimulateQuery {
+                notify_level: Some("active".to_string()),
+                source: None,
+                key: None,
+            })),
+            Bytes::new(),
+        )
+        .await
+        .into_response();
+        let (status, body) = json_body(response).await?;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["message"], "需要 device_ID_list");
         assert!(captured_keys(&harness)?.is_empty());
         Ok(())
     }
@@ -682,7 +703,7 @@ mod tests {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("targetKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: Some("active".to_string()),
                 source: None,
@@ -703,13 +724,13 @@ mod tests {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("targetKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: None,
                 source: Some("major".to_string()),
                 key: Some("does-not-exist".to_string()),
             })),
-            Bytes::new(),
+            device_list_body(&["targetKey"]),
         )
         .await
         .into_response();
@@ -724,13 +745,13 @@ mod tests {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("targetKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: Some("active".to_string()),
                 source: None,
                 key: None,
             })),
-            Bytes::new(),
+            device_list_body(&["targetKey"]),
         )
         .await
         .into_response();
@@ -760,7 +781,7 @@ mod tests {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("targetKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: Some("critical".to_string()),
                 source: None,
@@ -784,13 +805,13 @@ mod tests {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("targetKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: None,
                 source: Some("major".to_string()),
                 key: Some("yibin-gaoxian-2026".to_string()),
             })),
-            Bytes::new(),
+            device_list_body(&["targetKey"]),
         )
         .await
         .into_response();
@@ -870,13 +891,13 @@ mod tests {
         let harness = start_harness().await?;
         let response = simulate_handler(
             State(harness.state.clone()),
-            bearer_headers("targetKey")?,
+            bff_headers()?,
             Ok(Query(SimulateQuery {
                 notify_level: Some("active".to_string()),
                 source: None,
                 key: None,
             })),
-            Bytes::new(),
+            device_list_body(&["targetKey"]),
         )
         .await
         .into_response();

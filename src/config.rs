@@ -35,6 +35,7 @@ pub(crate) struct Config {
     pub(crate) bark_call: bool,
     pub(crate) alert_detail_base_url: String,
     pub(crate) alert_signing_key: SecretString,
+    pub(crate) bff_service_token: SecretString,
     pub(crate) incident_retention_days: u64,
     pub(crate) delivery_ledger_retention_days: u64,
     pub(crate) operation_retention_days: u64,
@@ -82,6 +83,7 @@ impl Config {
             bark_call: env_bool("BARK_CALL", true)?,
             alert_detail_base_url: required_env_string("ALERT_DETAIL_BASE_URL")?,
             alert_signing_key: required_env_secret("ALERT_SIGNING_KEY")?,
+            bff_service_token: required_env_secret("BFF_SERVICE_TOKEN")?,
             incident_retention_days: env_parse("INCIDENT_RETENTION_DAYS", 180)?,
             delivery_ledger_retention_days: env_parse("DELIVERY_LEDGER_RETENTION_DAYS", 180)?,
             operation_retention_days: env_parse("OPERATION_RETENTION_DAYS", 7)?,
@@ -189,6 +191,9 @@ impl Config {
                 validate_http_url("AMAP_REGEO_URL", &self.amap_regeo_url)?;
             }
         }
+        if self.bff_service_token.expose().is_empty() {
+            bail!("BFF_SERVICE_TOKEN cannot be empty");
+        }
         Ok(())
     }
 }
@@ -196,8 +201,18 @@ impl Config {
 pub(crate) struct SecretString(Zeroizing<String>);
 
 impl SecretString {
+    pub(crate) fn new(value: String) -> Self {
+        Self(Zeroizing::new(value))
+    }
+
     pub(crate) fn expose(&self) -> &str {
         self.0.as_str()
+    }
+}
+
+impl Clone for SecretString {
+    fn clone(&self) -> Self {
+        Self::new(self.0.as_str().to_string())
     }
 }
 
@@ -373,7 +388,7 @@ fn env_bool(name: &str, default: bool) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_bark_url, validate_public_base_url};
+    use super::{SecretString, normalize_bark_url, validate_public_base_url};
 
     #[test]
     fn normalizes_supported_bark_urls() -> anyhow::Result<()> {
@@ -411,5 +426,14 @@ mod tests {
         assert!(validate_public_base_url("TEST_URL", "http://localhost:8080").is_ok());
         assert!(validate_public_base_url("TEST_URL", "http://192.168.1.1:8080").is_err());
         assert!(validate_public_base_url("TEST_URL", "http://example.com").is_err());
+    }
+
+    #[test]
+    fn secret_string_is_redacted_and_cloneable() {
+        let secret = SecretString::new("bff-service-token-value".to_string());
+        let cloned = secret.clone();
+        assert_eq!(secret.expose(), "bff-service-token-value");
+        assert_eq!(cloned.expose(), "bff-service-token-value");
+        assert_eq!(format!("{secret:?}"), "[REDACTED]");
     }
 }

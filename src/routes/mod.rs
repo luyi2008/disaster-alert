@@ -1,5 +1,6 @@
 mod admin_events;
 mod admin_subscriptions;
+mod bff_auth;
 mod deliveries;
 mod incident;
 mod reverse_geocoder;

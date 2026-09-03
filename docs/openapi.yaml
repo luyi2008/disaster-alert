@@ -31,6 +31,9 @@ paths:
       description: |
         创建订阅并向 Bark 目标发送确认通知。
         仅在实例设置 `INSTANCE_TERMS_ACCEPTED=true` 时可用。
+        浏览器不得用 Bark token 当写凭证；必须带 BFF 服务凭证。
+      security:
+        - bffServiceBearer: []
       requestBody:
         required: true
         content:
@@ -83,6 +86,12 @@ paths:
                 $ref: "#/components/schemas/SubscribeApiResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          description: 缺少或无效的 BFF 服务凭证
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: 同一 Bark 目标已有更新的订阅请求
           content:
@@ -104,6 +113,8 @@ paths:
       tags: [Subscriptions]
       operationId: unsubscribe
       summary: 删除订阅
+      security:
+        - bffServiceBearer: []
       requestBody:
         required: true
         content:
@@ -119,6 +130,12 @@ paths:
                 $ref: "#/components/schemas/EmptySuccessResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          description: 缺少或无效的 BFF 服务凭证
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: 订阅不存在或已取消
           content:
@@ -306,11 +323,11 @@ paths:
         - `notify_level=passive|active|critical`：按每个目标订阅的地点和地震预警烈度带生成能打中该中断级别的假震中。
         - `source=major` 且 `key=` 目录条目 id：回放内置历史大地震（震中/震级用目录，发震时刻视为现在）。第一版只支持 `major`。
 
-        空 body 时目标为当前 `Authorization: Bearer` 这一把 Key。可选 JSON `device_ID_list` 只推列表中的 Key，不会额外广播给其他订阅者。
+        空 body 或省略 `device_ID_list` → 400「需要 device_ID_list」。JSON `device_ID_list` 只推列表中的 Key，不会额外广播给其他订阅者。
 
         架构与测试方法见仓库 `docs/simulate.md`。
       security:
-        - barkBearer: []
+        - bffServiceBearer: []
       parameters:
         - name: notify_level
           in: query
@@ -334,17 +351,14 @@ paths:
             examples: [yibin-gaoxian-2026, wenchuan-2008, tangshan-1976]
           description: 历史目录条目 id。
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               $ref: "#/components/schemas/SimulateRequest"
             examples:
-              currentDevice:
-                summary: 空对象，等价于空 body，只打 Bearer Key
-                value: {}
               listedDevices:
-                summary: 只向列表中的 Key 各推一次
+                summary: 向列表中的 Key 各推一次
                 value:
                   device_ID_list: [exampleKeyA, exampleKeyB]
       responses:
@@ -357,7 +371,7 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
-          description: 缺少或无效的 Bearer Bark Key
+          description: 缺少或无效的 BFF 服务凭证
           content:
             application/json:
               schema:
@@ -461,6 +475,12 @@ components:
       type: http
       scheme: bearer
       description: Bark 设备 Key，字符集与长度规则与订阅接口相同。不要把真实 Key 写入文档或测试夹具。
+    bffServiceBearer:
+      type: http
+      scheme: bearer
+      description: |
+        BFF 与 Rust 共享的服务凭证，对应环境变量 `BFF_SERVICE_TOKEN`。
+        与 Bark 设备 Key、用户 session cookie 都不是同一种凭据。
   responses:
     BadRequest:
       description: 请求体、查询参数或订阅规则无效
@@ -725,6 +745,7 @@ components:
     SimulateRequest:
       type: object
       additionalProperties: false
+      required: [device_ID_list]
       properties:
         device_ID_list:
           type: array
@@ -733,7 +754,7 @@ components:
           items:
             type: string
             pattern: "^[A-Za-z0-9]{1,64}$"
-          description: 出现时只向这些 Key 推送；省略则只向 Bearer Key 推送。空数组为 400。
+          description: 必填。只向这些 Key 推送。省略或空 body 为 400「需要 device_ID_list」。空数组为 400。
     SimulateApiResponse:
       type: object
       additionalProperties: false

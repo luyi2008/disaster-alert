@@ -174,17 +174,17 @@ pub(crate) fn find_history_record<'a>(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DeviceListError {
+    Missing,
     Empty,
     TooMany,
     InvalidKey,
 }
 
 pub(crate) fn resolve_device_keys(
-    bearer_key: &str,
     device_id_list: Option<Vec<String>>,
 ) -> std::result::Result<Vec<String>, DeviceListError> {
     let Some(list) = device_id_list else {
-        return Ok(vec![bearer_key.to_string()]);
+        return Err(DeviceListError::Missing);
     };
     if list.is_empty() {
         return Err(DeviceListError::Empty);
@@ -829,17 +829,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_device_keys_defaults_to_bearer_and_rejects_empty_list() {
+    fn resolve_device_keys_requires_a_non_empty_list() {
+        assert_eq!(resolve_device_keys(None), Err(DeviceListError::Missing));
         assert_eq!(
-            resolve_device_keys("abc123", None).ok(),
-            Some(vec!["abc123".to_string()])
-        );
-        assert_eq!(
-            resolve_device_keys("abc123", Some(Vec::new())),
+            resolve_device_keys(Some(Vec::new())),
             Err(DeviceListError::Empty)
         );
         assert_eq!(
-            resolve_device_keys("abc123", Some(vec!["keyA".to_string(), "keyA".to_string()])).ok(),
+            resolve_device_keys(Some(vec!["keyA".to_string(), "keyA".to_string()])).ok(),
             Some(vec!["keyA".to_string()])
         );
     }
