@@ -841,6 +841,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subscribe_accepts_x_bff_service_token_without_authorization() -> anyhow::Result<()> {
+        let (state, _directory) = test_state(false)?;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-bff-service-token",
+            HeaderValue::from_static("test-bff-service-token"),
+        );
+        let response = subscribe_handler(State(state), headers, Ok(Json(request())))
+            .await
+            .into_response();
+        let (status, body) = json_body(response).await?;
+        anyhow::ensure!(status == StatusCode::SERVICE_UNAVAILABLE);
+        anyhow::ensure!(body["message"] == INSTANCE_TERMS_REQUIRED_MESSAGE);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn unsubscribe_without_service_token_is_unauthorized() -> anyhow::Result<()> {
         let (state, _directory) = test_state(true)?;
         let payload = UnsubscribeRequest {
