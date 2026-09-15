@@ -18,6 +18,28 @@
 
 本仓库的二进制只提供 JSON API 与后台任务。启动服务用 `cargo run`（清单里只有 `disaster-alert`）。进程和 Docker 镜像都不会再返回网页；订阅页和通知详情页见 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)。若 Bark 详情仍使用原来的站点根地址，由站点反代将 `/` 与 `/incidents` 指到前端服务、将 `/api` 与 `/health` 指到本服务。
 
+### API 文档本地预览
+
+OpenAPI 文档源文件在 [docs/openapi.yaml](docs/openapi.yaml)。如果想直接在本地用静态页面查看文档，可在仓库根目录执行：
+
+```bash
+python3 -m http.server 8000 --directory docs
+```
+
+随后打开：
+
+```text
+http://localhost:8000/
+```
+
+首页会自动跳转到生成的 API 文档页；若没有跳转，也可直接打开：
+
+```text
+http://localhost:8000/openapi.html
+```
+
+线上站点已通过 GitHub Pages 发布，可直接访问仓库的 Pages 入口。
+
 地震预警的预计烈度由震级、距离和深度估算；未命中订阅的烈度区间时不会发送预警通知。地震速报不走烈度规则，只要震级达到订阅阈值就会通知，与监测点远近无关；通知统一使用 Bark `passive`，不按震级或最大烈度提高中断级别。
 
 地震波到达时间由起震时间、距离、深度和配置的波速估算。震级不改变传播时间。
