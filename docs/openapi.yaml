@@ -23,7 +23,7 @@ tags:
   - name: Testing
     description: 旁路测试推送（不进入真实 EEW 入队）。设计说明见 docs/simulate.md。
 paths:
-  /api/subscribe:
+  /api/subscription/subscribe:
     post:
       tags: [Subscriptions]
       operationId: subscribe
@@ -108,7 +108,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-  /api/unsubscribe:
+  /api/subscription/unsubscribe:
     delete:
       tags: [Subscriptions]
       operationId: unsubscribe
@@ -146,7 +146,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-  /api/subscriptions:
+  /api/subscription/subscriptions:
     get:
       tags: [Subscriptions]
       operationId: listSubscriptions
@@ -177,7 +177,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-  /api/bark-urls:
+  /api/subscription/bark-urls:
     get:
       tags: [Metadata]
       operationId: listBarkUrls
@@ -189,7 +189,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BarkUrlsApiResponse"
-  /api/subscription-options:
+  /api/subscription/subscription-options:
     get:
       tags: [Metadata]
       operationId: getSubscriptionOptions
@@ -202,7 +202,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SubscriptionOptionsApiResponse"
-  /api/reverse-geocode:
+  /api/subscription/reverse-geocode:
     get:
       tags: [Metadata]
       operationId: reverseGeocode
@@ -235,7 +235,7 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-  /api/incidents/{incident_id}/notifications/{token}:
+  /api/subscription/incidents/{incident_id}/notifications/{token}:
     get:
       tags: [Notifications]
       operationId: getIncidentNotification
@@ -281,7 +281,7 @@ paths:
           $ref: "#/components/responses/InternalServerError"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
-  /api/status:
+  /api/subscription/status:
     get:
       tags: [Operations]
       operationId: getStatus
@@ -310,7 +310,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmptySuccessResponse"
-  /api/simulate:
+  /api/subscription/simulate:
     post:
       tags: [Testing]
       operationId: simulateAlert
@@ -384,7 +384,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
-  /api/history:
+  /api/subscription/history:
     get:
       tags: [Testing]
       operationId: listHistory
@@ -420,7 +420,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
-  /api/deliveries:
+  /api/subscription/deliveries:
     get:
       tags: [Notifications]
       operationId: listDeliveries
@@ -430,7 +430,7 @@ paths:
         按送达时间从新到旧返回，默认最多 50 条，可通过 `limit` 调整（1–200）。
         本接口不是运营全站查询，不能用空 Key 或设备列表列出其他订阅者的投递。
 
-        只包含直播 EEW 管道实际写入账本的成功投递。`POST /api/simulate` 的旁路试推、订阅确认通知、以及仍在重试或已进入死信的失败投递都不会出现。
+        只包含直播 EEW 管道实际写入账本的成功投递。`POST /api/subscription/simulate` 的旁路试推、订阅确认通知、以及仍在重试或已进入死信的失败投递都不会出现。
         同一事件后续报告在账本中只保留最近一次成功投递。取消订阅后仍可查询保留期内的历史记录。
       security:
         - barkBearer: []
