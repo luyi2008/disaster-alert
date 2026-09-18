@@ -1,6 +1,6 @@
 # 模拟测试旁路
 
-`POST /api/subscription/simulate` 与 `GET /api/subscription/history` 是用户面测试口：对齐 saevio / earthquake-alert「对自己的 Bark Key 试推」的用法，**不是**运营全站扇出，也**不**把事件注入直播 EEW 管道。
+`POST /api/simulate` 与 `GET /api/history` 是用户面测试口：对齐 saevio / earthquake-alert「对自己的 Bark Key 试推」的用法，**不是**运营全站扇出，也**不**把事件注入直播 EEW 管道。
 
 字段级 HTTP 契约以 [OpenAPI](openapi.yaml) 为准。本文说明架构边界、查找规则和测试方法。
 
@@ -15,13 +15,13 @@
 **无**
 
 - 不调用 `EventRuntime::submit_*`，不写入 inbox / MatchEngine / 投递账本
-- 因此 `GET /api/subscription/deliveries` 查不到这次试推
-- 不复制 saevio 的 `POST /api/subscription/simulate?token=` 对 `store.List()` 全站扇出
-- 没有独立的 `POST /api/subscription/simulate-history`（历史回放合并进同一个 `POST /api/subscription/simulate`）
+- 因此 `GET /api/deliveries` 查不到这次试推
+- 不复制 saevio 的 `POST /api/simulate?token=` 对 `store.List()` 全站扇出
+- 没有独立的 `POST /api/simulate-history`（历史回放合并进同一个 `POST /api/simulate`）
 - 第一版历史目录只有 `source=major`，没有 Wolfx `cenc` / `jma` 列表
 - 不改 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)
 
-`POST /api/subscription/simulate` **不**要求 `INSTANCE_TERMS_ACCEPTED`。创建订阅的 `POST /api/subscription/subscribe` 仍然要求该门禁。
+`POST /api/simulate` **不**要求 `INSTANCE_TERMS_ACCEPTED`。创建订阅的 `POST /api/subscribe` 仍然要求该门禁。
 
 ## 数据流
 
@@ -37,10 +37,10 @@ flowchart LR
     DeliveryLedger --> BarkLive[BarkNotifier]
   end
   subgraph bypass [SimulateBypass]
-    SimulatePost["POST /api/subscription/simulate"] --> Lookup
+    SimulatePost["POST /api/simulate"] --> Lookup
     Lookup["simulate_subscriptions_by_device_key"] --> Synth["simulated_event or historical_event"]
     Synth --> SendOne["BarkNotifier.send_disaster_alert"]
-    HistoryGet["GET /api/subscription/history"] --> Catalog["builtin_major_records"]
+    HistoryGet["GET /api/history"] --> Catalog["builtin_major_records"]
   end
   Lookup -.-> Storage[(SubscriptionStore)]
 ```
@@ -51,7 +51,7 @@ flowchart LR
 
 ## HTTP 与两种互斥模式
 
-`POST /api/subscription/simulate` 的查询参数必须二选一，没有默认模式；两个都给或两个都不给 → 400。
+`POST /api/simulate` 的查询参数必须二选一，没有默认模式；两个都给或两个都不给 → 400。
 
 ### Mode A：`notify_level`
 
@@ -79,7 +79,7 @@ flowchart LR
 - 空 body、`{}` 或省略 `device_ID_list` → 400「需要 device_ID_list」。空数组 → 400「device_ID_list 不能为空」。
 - `Authorization: Bearer <bark token>`（而不是服务凭证）→ 401「服务凭证无效」。
 
-`GET /api/subscription/history?source=major` 公开只读，返回上述三条目录。带有效 Bearer 时，按该 Key 已存监测点标注 `distance_km`、`hypocentral_km`、`estimated_intensity`。
+`GET /api/history?source=major` 公开只读，返回上述三条目录。带有效 Bearer 时，按该 Key 已存监测点标注 `distance_km`、`hypocentral_km`、`estimated_intensity`。
 
 ## 订阅查找
 
@@ -133,7 +133,7 @@ cargo test --lib simulate
 | `device_list_does_not_fan_out_to_other_subscribers` | 列表含缺失 Key → `pushed=1, skipped=1`，第二把订阅不被打到 |
 | `history_replay_uses_catalog_event_id` | `event_id` 前缀 `HIST-MAJOR-CENC-202606290012-` |
 | `history_catalog_is_public_and_can_annotate_a_subscription` | 无 Bearer 无距离；带 Bearer 才有 `distance_km` |
-| `unsupported_history_source_is_rejected` | `GET /api/subscription/history?source=cenc` → 400「不支持的历史目录」 |
+| `unsupported_history_source_is_rejected` | `GET /api/history?source=cenc` → 400「不支持的历史目录」 |
 
 ## 手动测试
 
@@ -143,33 +143,33 @@ cargo test --lib simulate
 
 ```bash
 # 确认本实例已有订阅
-curl -sS "http://127.0.0.1:30010/api/subscription/status"
+curl -sS "http://127.0.0.1:30010/api/status"
 
 # Mode A：按中断级别合成假震中
-curl -sS -X POST "http://127.0.0.1:30010/api/subscription/simulate?notify_level=active" \
+curl -sS -X POST "http://127.0.0.1:30010/api/simulate?notify_level=active" \
   -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"device_ID_list":["yourBarkKey"]}'
 
 # Mode B：回放宜宾高县
-curl -sS -X POST "http://127.0.0.1:30010/api/subscription/simulate?source=major&key=yibin-gaoxian-2026" \
+curl -sS -X POST "http://127.0.0.1:30010/api/simulate?source=major&key=yibin-gaoxian-2026" \
   -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"device_ID_list":["yourBarkKey"]}'
 
 # 只对列表中的 Key 推送（列表里没有订阅的记 skipped）
-curl -sS -X POST "http://127.0.0.1:30010/api/subscription/simulate?notify_level=critical" \
+curl -sS -X POST "http://127.0.0.1:30010/api/simulate?notify_level=critical" \
   -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"device_ID_list":["yourBarkKey"]}'
 
 # 公开目录；加 Bearer 时带距离/烈度标注
-curl -sS "http://127.0.0.1:30010/api/subscription/history?source=major"
-curl -sS "http://127.0.0.1:30010/api/subscription/history?source=major" \
+curl -sS "http://127.0.0.1:30010/api/history?source=major"
+curl -sS "http://127.0.0.1:30010/api/history?source=major" \
   -H "Authorization: Bearer yourBarkKey"
 ```
 
-若尚未订阅，先 `POST /api/subscription/subscribe`（见 OpenAPI 示例）。订阅成功后再打 simulate。
+若尚未订阅，先 `POST /api/subscribe`（见 OpenAPI 示例）。订阅成功后再打 simulate。
 
 ### 排障
 
@@ -181,4 +181,4 @@ curl -sS "http://127.0.0.1:30010/api/subscription/history?source=major" \
 | 400「不支持的历史目录」 | `source` 不是 `major` |
 | 400「查询参数无效」/ 模式相关文案 | `notify_level` 与 `source`/`key` 同时出现或同时缺失 |
 
-仍 404 时看 `GET /api/subscription/status` 的 `total_subscriptions`。值为 0 说明订阅没写进当前进程使用的数据库。
+仍 404 时看 `GET /api/status` 的 `total_subscriptions`。值为 0 说明订阅没写进当前进程使用的数据库。
