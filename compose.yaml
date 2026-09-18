@@ -3,6 +3,7 @@ name: disaster-alert
 services:
   main:
     image: ${DISASTER_ALERT_IMAGE:-ghcr.io/luyi2008/disaster-alert:latest}
+    container_name: disaster-alert-api
     build:
       context: .
     restart: unless-stopped
@@ -19,6 +20,9 @@ services:
         protocol: tcp
     volumes:
       - disaster-alert-data:/data
+    networks:
+      - default
+      - disaster-alert-net
     healthcheck:
       test:
         - CMD
@@ -36,3 +40,7 @@ services:
 
 volumes:
   disaster-alert-data:
+
+networks:
+  disaster-alert-net:
+    external: true
