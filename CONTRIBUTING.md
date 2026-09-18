@@ -38,7 +38,7 @@ npm install
 npm run dev
 ```
 
-Vite 会把 `/api` 和 `/health` 代理到本机 API。浏览器打开 Vite 提示的本地地址，不要只开 `http://127.0.0.1:30010/` 当网页。注意本仓库的接口路径已统一加上 `/api/subscription/` 前缀（见 [README.md](README.md) 的接口列表），`disaster-alert-web` 里调用这些接口的地方需要同步更新。
+Vite 会把 `/api` 和 `/health` 代理到本机 API。浏览器打开 Vite 提示的本地地址，不要只开 `http://127.0.0.1:30010/` 当网页。
 
 提交前至少跑：
 
@@ -115,11 +115,11 @@ docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 
 这个项目会保存 Bark Key、监测地点和通知级别，任何相关改动都要先确认下面几条约束：
 
-- 用户面只允许通过 `POST /api/subscription/subscribe` 创建或覆盖订阅，通过 `GET /api/subscription/subscriptions` 读取**调用方自己的**激活订阅，通过 `DELETE /api/subscription/unsubscribe` 删除订阅。三个写接口（subscribe / unsubscribe / simulate）必须带 `Authorization: Bearer <BFF_SERVICE_TOKEN>`，浏览器 Bark token 不能当写凭证。匹配管道和 Bark 推送内容格式不在本鉴权改动范围内。
-- `POST /api/subscription/simulate` 与 `GET /api/subscription/history` 是旁路测试口：simulate 验 BFF 服务凭证，设备来自 `device_ID_list`；history 仍可用 Bark Bearer 标注距离。只对列表中的已存订阅调用 Bark，**不**进入 `EventRuntime` / inbox / 匹配 / 投递账本，也**不**对全站扇出。不要求 `INSTANCE_TERMS_ACCEPTED`。真实 Bark Key 不得写入测试、文档或提交。架构与测试方法见 [docs/simulate.md](docs/simulate.md)
-- `GET /api/subscription/subscriptions` 用 `Authorization: Bearer` Bark Key 返回该 Key 当前激活的地点和规则。不得接受空 Key，也不得列出其他设备。已取消、仅待确认或不存在的订阅返回 HTTP 200 且 `success` 为 false，不返回 4xx。不要求 `INSTANCE_TERMS_ACCEPTED`
-- `GET /api/subscription/deliveries` 用同一套 Bearer Bark Key 读取**调用方自己的**投递账本（成功送达的直播灾害通知）。不得接受空 Key，也不得列出其他设备的记录。不包含模拟旁路、订阅确认通知或失败/重试中的投递。取消订阅后，在账本保留期内仍可查询
-- 另有未写入 README / OpenAPI 的运营只读接口：列出当前激活订阅的 Bark Key、按 Key 返回地点和规则（`GET /api/subscription/admin/subscriptions`，空结果同样 HTTP 200 且 `success` 为 false，不返回 4xx）、查询投递账本（`device_key` 可空，空则返回全部成功投递，每条含 Bark Key 与事件内容），以及列出保留期内已接入灾害的事件详情（`GET /api/subscription/admin/events`）。当前无鉴权，后续补上；不要把这些路径写进用户文档
+- 用户面只允许通过 `POST /api/subscribe` 创建或覆盖订阅，通过 `GET /api/subscriptions` 读取**调用方自己的**激活订阅，通过 `DELETE /api/unsubscribe` 删除订阅。三个写接口（subscribe / unsubscribe / simulate）必须带 `Authorization: Bearer <BFF_SERVICE_TOKEN>`，浏览器 Bark token 不能当写凭证。匹配管道和 Bark 推送内容格式不在本鉴权改动范围内。
+- `POST /api/simulate` 与 `GET /api/history` 是旁路测试口：simulate 验 BFF 服务凭证，设备来自 `device_ID_list`；history 仍可用 Bark Bearer 标注距离。只对列表中的已存订阅调用 Bark，**不**进入 `EventRuntime` / inbox / 匹配 / 投递账本，也**不**对全站扇出。不要求 `INSTANCE_TERMS_ACCEPTED`。真实 Bark Key 不得写入测试、文档或提交。架构与测试方法见 [docs/simulate.md](docs/simulate.md)
+- `GET /api/subscriptions` 用 `Authorization: Bearer` Bark Key 返回该 Key 当前激活的地点和规则。不得接受空 Key，也不得列出其他设备。已取消、仅待确认或不存在的订阅返回 HTTP 200 且 `success` 为 false，不返回 4xx。不要求 `INSTANCE_TERMS_ACCEPTED`
+- `GET /api/deliveries` 用同一套 Bearer Bark Key 读取**调用方自己的**投递账本（成功送达的直播灾害通知）。不得接受空 Key，也不得列出其他设备的记录。不包含模拟旁路、订阅确认通知或失败/重试中的投递。取消订阅后，在账本保留期内仍可查询
+- 另有未写入 README / OpenAPI 的运营只读接口：列出当前激活订阅的 Bark Key、按 Key 返回地点和规则（`GET /api/admin/subscriptions`，空结果同样 HTTP 200 且 `success` 为 false，不返回 4xx）、查询投递账本（`device_key` 可空，空则返回全部成功投递，每条含 Bark Key 与事件内容），以及列出保留期内已接入灾害的事件详情（`GET /api/admin/events`）。当前无鉴权，后续补上；不要把这些路径写进用户文档
 - 退订接口只返回操作结果，不回显订阅内容
 - 公开的统计接口只返回聚合数量，不返回 Bark Key、位置或通知规则
 - 日志中只输出 `mask_device_key` 处理后的 Bark Key 和通知 token，不输出完整 Bark Key、高德 Key 和原始订阅请求体；入站 URI 中的 `device_key` 查询参数同样必须脱敏

@@ -376,20 +376,18 @@ mod tests {
 
     #[test]
     fn masks_notification_token_in_relative_uri() -> anyhow::Result<()> {
-        let uri: Uri = "/api/subscription/incidents/evt-1/notifications/abcdefg.signaturetoken"
+        let uri: Uri = "/api/incidents/evt-1/notifications/abcdefg.signaturetoken"
             .parse()
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let redacted = redact_http_uri(&uri);
-        anyhow::ensure!(
-            redacted.contains("/api/subscription/incidents/evt-1/notifications/abc***ken")
-        );
+        anyhow::ensure!(redacted.contains("/api/incidents/evt-1/notifications/abc***ken"));
         anyhow::ensure!(!redacted.contains("abcdefg.signaturetoken"));
         Ok(())
     }
 
     #[test]
     fn masks_device_key_query_in_relative_uri() -> anyhow::Result<()> {
-        let uri: Uri = "/api/subscription/admin/subscriptions?device_key=barkdevicekey"
+        let uri: Uri = "/api/admin/subscriptions?device_key=barkdevicekey"
             .parse()
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let redacted = redact_http_uri(&uri);

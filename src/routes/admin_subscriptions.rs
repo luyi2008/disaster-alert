@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn missing_or_invalid_device_key_is_rejected() -> anyhow::Result<()> {
-        let uri = axum::http::Uri::from_static("/api/subscription/admin/subscriptions");
+        let uri = axum::http::Uri::from_static("/api/admin/subscriptions");
         let query = Query::<AdminSubscriptionQuery>::try_from_uri(&uri);
         let Err((status, _)) = parse_admin_subscription_query(query) else {
             anyhow::bail!("missing key should be rejected");

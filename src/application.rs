@@ -29,7 +29,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const SUBSCRIPTION_BODY_LIMIT_BYTES: usize = 32 * 1024;
 const SIMULATE_BODY_LIMIT_BYTES: usize = 8 * 1024;
-const API_PREFIX: &str = "/api/subscription";
 
 pub fn run_from_env() -> Result<()> {
     let dotenv_path = load_dotenv().context("failed to load .env configuration")?;
@@ -150,38 +149,38 @@ async fn run() -> Result<()> {
 
     let cors = build_cors_layer(&config)?;
 
-    let api_routes = Router::new()
+    let app = Router::new()
         .route(
-            "/incidents/{incident_id}/notifications/{token}",
+            "/api/incidents/{incident_id}/notifications/{token}",
             get(incident_detail_handler),
         )
+        .route("/health", get(health_handler))
         .route(
-            "/subscribe",
+            "/api/subscribe",
             post(subscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
         )
-        .route("/bark-urls", get(bark_urls_handler))
-        .route("/reverse-geocode", get(reverse_geocode_handler))
-        .route("/subscription-options", get(subscription_options_handler))
+        .route("/api/bark-urls", get(bark_urls_handler))
+        .route("/api/reverse-geocode", get(reverse_geocode_handler))
         .route(
-            "/unsubscribe",
+            "/api/subscription-options",
+            get(subscription_options_handler),
+        )
+        .route(
+            "/api/unsubscribe",
             delete(unsubscribe_handler).layer(DefaultBodyLimit::max(SUBSCRIPTION_BODY_LIMIT_BYTES)),
         )
-        .route("/status", get(status_handler))
+        .route("/api/status", get(status_handler))
         .route(
-            "/simulate",
+            "/api/simulate",
             post(simulate_handler).layer(DefaultBodyLimit::max(SIMULATE_BODY_LIMIT_BYTES)),
         )
-        .route("/history", get(history_handler))
-        .route("/deliveries", get(deliveries_handler))
-        .route("/subscriptions", get(subscriptions_handler))
-        .route("/admin/device-keys", get(admin_device_keys_handler))
-        .route("/admin/subscriptions", get(admin_subscriptions_handler))
-        .route("/admin/deliveries", get(admin_deliveries_handler))
-        .route("/admin/events", get(admin_events_handler));
-
-    let app = Router::new()
-        .route("/health", get(health_handler))
-        .nest(API_PREFIX, api_routes)
+        .route("/api/history", get(history_handler))
+        .route("/api/deliveries", get(deliveries_handler))
+        .route("/api/subscriptions", get(subscriptions_handler))
+        .route("/api/admin/device-keys", get(admin_device_keys_handler))
+        .route("/api/admin/subscriptions", get(admin_subscriptions_handler))
+        .route("/api/admin/deliveries", get(admin_deliveries_handler))
+        .route("/api/admin/events", get(admin_events_handler))
         .layer(cors)
         .layer(CompressionLayer::new())
         .layer(
