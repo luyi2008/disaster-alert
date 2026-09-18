@@ -29,7 +29,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const SUBSCRIPTION_BODY_LIMIT_BYTES: usize = 32 * 1024;
 const SIMULATE_BODY_LIMIT_BYTES: usize = 8 * 1024;
-const API_PREFIX: &str = "/api/subscription";
+const API_PREFIX: &str = "/api";
 
 pub fn run_from_env() -> Result<()> {
     let dotenv_path = load_dotenv().context("failed to load .env configuration")?;

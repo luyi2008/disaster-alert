@@ -88,7 +88,7 @@ flowchart LR
 | `retries_by_destination` | 按设备查重试。 |
 | `retries_by_batch` | 按批次查重试。 |
 | `dead_letters` | 重试耗尽后的死信。 |
-| `ledger` | 成功投递账本。`GET /api/subscription/deliveries` 读这里。 |
+| `ledger` | 成功投递账本。`GET /api/deliveries` 读这里。 |
 | `contexts` | Bark 详情页快照。 |
 
 ### 元数据
@@ -99,7 +99,7 @@ flowchart LR
 
 ## 什么会留下
 
-不是「台网全量历史都在库里」。地震速报只要本进程接入过，就会留下 incident 档案，**不要求**当时有订阅命中。`GET /api/subscription/admin/events` 列出这些记录；`has_matched_subscribers` 区分「接入了」和「有人收到」。
+不是「台网全量历史都在库里」。地震速报只要本进程接入过，就会留下 incident 档案，**不要求**当时有订阅命中。`GET /api/admin/events` 列出这些记录；`has_matched_subscribers` 区分「接入了」和「有人收到」。
 
 预警、气象、海啸、台风未命中时仍不建档。下列情况也不会长期写入 `incidents`：
 
@@ -112,9 +112,9 @@ flowchart LR
 
 目录完整度受上游限制：Wolfx `cenc_eqlist` 只取当前最新一条，FAN Studio CENC 也是当前快照，不是列表回放。停机期间或同时发生、未出现在「最新一条」里的地震不会仅因保留策略而出现。产品决策见 [prd/earthquake-report-catalog.md](prd/earthquake-report-catalog.md)。
 
-`POST /api/subscription/simulate` 不走这条流水线，不会写入 `inbox` / `incidents` / `match_jobs` / `ledger`。旁路边界见 [simulate.md](simulate.md)。
+`POST /api/simulate` 不走这条流水线，不会写入 `inbox` / `incidents` / `match_jobs` / `ledger`。旁路边界见 [simulate.md](simulate.md)。
 
-订阅本身（`subscriptions` 及相关索引）一直保留到用户 `DELETE /api/subscription/unsubscribe`，不受 incident 保留天数约束。`rejected_inbox`、`dead_letters` 和 `meta` 目前也不在按天数清理的范围内。
+订阅本身（`subscriptions` 及相关索引）一直保留到用户 `DELETE /api/unsubscribe`，不受 incident 保留天数约束。`rejected_inbox`、`dead_letters` 和 `meta` 目前也不在按天数清理的范围内。
 
 ## 过期窗口与保留期限
 

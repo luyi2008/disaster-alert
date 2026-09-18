@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn invalid_limit_is_rejected() -> anyhow::Result<()> {
-        let uri = axum::http::Uri::from_static("/api/subscription/admin/events?limit=0");
+        let uri = axum::http::Uri::from_static("/api/admin/events?limit=0");
         let query = Query::<AdminEventQuery>::try_from_uri(&uri);
         let Err((status, message)) = parse_admin_event_query(query) else {
             anyhow::bail!("limit=0 should be rejected");

@@ -219,7 +219,7 @@ docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 | `BARK_CALL` | `true` | 是否为非静默灾害通知启用 Bark 通话级提醒 |
 | `ALERT_DETAIL_BASE_URL` | 必填 | Bark 客户端能够访问的通知详情页根地址，部署时使用 HTTPS |
 | `ALERT_SIGNING_KEY` | 必填 | 32 字节、无填充的 URL-safe Base64 私钥 |
-| `BFF_SERVICE_TOKEN` | 必填 | BFF 调用写接口（`POST /api/subscription/subscribe`、`DELETE /api/subscription/unsubscribe`、`POST /api/subscription/simulate`）时放在 `Authorization: Bearer` 里的共享服务凭证。浏览器不得再用 Bark token 当写凭证 |
+| `BFF_SERVICE_TOKEN` | 必填 | BFF 调用写接口（`POST /api/subscribe`、`DELETE /api/unsubscribe`、`POST /api/simulate`）时放在 `Authorization: Bearer` 里的共享服务凭证。浏览器不得再用 Bark token 当写凭证 |
 
 `BARK_URL_ALLOWLIST` 支持域名、IP、端口和反向代理子路径，例如：
 
@@ -233,7 +233,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | --- | --- | --- |
 | `RECONNECT_MIN_SECONDS` | `1` | 数据源断开后的最小重连间隔 |
 | `RECONNECT_MAX_SECONDS` | `30` | 数据源断开后的最大重连间隔 |
-| `HUANIA_ENABLED` | `false` | 是否启动 Huania 地震预警 HTTP 轮询。未设置或 `false` 时不创建该数据源、不发轮询请求，`/api/subscription/subscription-options` 与 `/api/subscription/status` 也不返回 Huania；改值后需重启进程 |
+| `HUANIA_ENABLED` | `false` | 是否启动 Huania 地震预警 HTTP 轮询。未设置或 `false` 时不创建该数据源、不发轮询请求，`/api/subscription-options` 与 `/api/status` 也不返回 Huania；改值后需重启进程 |
 | `PUSH_UPDATES` | `false` | 是否推送同一事件的后续报告 |
 | `UPDATE_MIN_REPORT_GAP` | `1` | 后续报告至少间隔多少个报告编号才再次推送 |
 | `IGNORE_TRAINING` | `true` | 是否忽略演练信息 |
@@ -246,7 +246,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `REVERSE_GEOCODING_ENABLED` | `true` | 是否启用 `/api/subscription/reverse-geocode` |
+| `REVERSE_GEOCODING_ENABLED` | `true` | 是否启用 `/api/reverse-geocode` |
 | `REVERSE_GEOCODING_URL` | `https://nominatim.openstreetmap.org/reverse` | Nominatim 备用接口。阿里云 ECS 等访问境外超时的环境应配置 `AMAP_KEY` |
 | `AMAP_KEY` | 空 | 可选。高德开放平台 **Web 服务** Key；设置后优先走高德逆地理编码，失败再回退 Nominatim |
 | `AMAP_REGEO_URL` | `https://restapi.amap.com/v3/geocode/regeo` | 高德逆地理编码地址，仅在设置了 `AMAP_KEY` 时使用 |
@@ -272,9 +272,9 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 - 不要在日志、截图、Issue 或测试数据中使用真实 Bark Key、用户位置或通知详情 URL
 - 修改 `ALERT_SIGNING_KEY` 后，之前发送的详情链接会失效
 - 统计接口只返回聚合数量
-- `GET /api/subscription/subscriptions` 只返回当前 Bearer Bark Key 自己的激活订阅，不列出其他设备
-- `GET /api/subscription/deliveries` 只返回当前 Bearer Bark Key 自己的成功投递记录，不列出其他设备
-- `POST /api/subscription/subscribe`、`DELETE /api/subscription/unsubscribe`、`POST /api/subscription/simulate` 只接受 `Authorization: Bearer <BFF_SERVICE_TOKEN>`，拒绝把 Bark token 当写凭证
+- `GET /api/subscriptions` 只返回当前 Bearer Bark Key 自己的激活订阅，不列出其他设备
+- `GET /api/deliveries` 只返回当前 Bearer Bark Key 自己的成功投递记录，不列出其他设备
+- `POST /api/subscribe`、`DELETE /api/unsubscribe`、`POST /api/simulate` 只接受 `Authorization: Bearer <BFF_SERVICE_TOKEN>`，拒绝把 Bark token 当写凭证
 
 ## 使用与部署责任
 
@@ -294,17 +294,17 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `POST` | `/api/subscription/subscribe` | 创建或覆盖订阅 |
-| `GET` | `/api/subscription/subscriptions` | 只查当前 Bearer Bark Key 的激活订阅，不能查其他设备 |
-| `DELETE` | `/api/subscription/unsubscribe` | 删除订阅 |
-| `GET` | `/api/subscription/bark-urls` | 获取可用的 Bark 服务地址 |
-| `GET` | `/api/subscription/subscription-options` | 获取灾种、来源和默认规则 |
-| `GET` | `/api/subscription/reverse-geocode` | 根据坐标查询行政区 |
-| `GET` | `/api/subscription/incidents/{incident_id}/notifications/{token}` | 获取通知详情（需通知链接中的 token） |
-| `GET` | `/api/subscription/status` | 获取订阅总数、数据源、后台任务状态，以及实例是否已确认责任声明 |
-| `POST` | `/api/subscription/simulate` | 向指定 Bark Key 发送模拟或历史回放预警（旁路，不入直播 EEW 管道） |
-| `GET` | `/api/subscription/history` | 读取内置历史地震目录 |
-| `GET` | `/api/subscription/deliveries` | 只查当前 Bearer Bark Key 的成功投递，不能查其他设备 |
+| `POST` | `/api/subscribe` | 创建或覆盖订阅 |
+| `GET` | `/api/subscriptions` | 只查当前 Bearer Bark Key 的激活订阅，不能查其他设备 |
+| `DELETE` | `/api/unsubscribe` | 删除订阅 |
+| `GET` | `/api/bark-urls` | 获取可用的 Bark 服务地址 |
+| `GET` | `/api/subscription-options` | 获取灾种、来源和默认规则 |
+| `GET` | `/api/reverse-geocode` | 根据坐标查询行政区 |
+| `GET` | `/api/incidents/{incident_id}/notifications/{token}` | 获取通知详情（需通知链接中的 token） |
+| `GET` | `/api/status` | 获取订阅总数、数据源、后台任务状态，以及实例是否已确认责任声明 |
+| `POST` | `/api/simulate` | 向指定 Bark Key 发送模拟或历史回放预警（旁路，不入直播 EEW 管道） |
+| `GET` | `/api/history` | 读取内置历史地震目录 |
+| `GET` | `/api/deliveries` | 只查当前 Bearer Bark Key 的成功投递，不能查其他设备 |
 | `GET` | `/health` | 健康检查 |
 
 ## 开发
