@@ -2,7 +2,7 @@
 
 运营要能在管理事件列表里看到接入过的地震速报，即使当时没有任何订阅命中。这不是新表，也不是新流水线：复用现有 `IncidentRecord`，只改「没人订阅就删档」的策略。行为说明以 [storage.md](../storage.md) 为准。
 
-公开订阅、Bark 推送、匹配规则不在本文范围。查询口仍是未写入用户文档的 `GET /api/admin/events`。
+公开订阅、Bark 推送、匹配规则不在本文范围。查询口仍是未写入用户文档的 `GET /api/subscription/admin/events`。
 
 ## 背景
 
@@ -51,7 +51,7 @@
 
 ## 验收
 
-- 无订阅时接入一条 CENC 速报：`GET /api/admin/events` 能看到该 incident，`has_matched_subscribers` 为 false，Bark 未发送。
+- 无订阅时接入一条 CENC 速报：`GET /api/subscription/admin/events` 能看到该 incident，`has_matched_subscribers` 为 false，Bark 未发送。
 - 同一条速报晚于预警过期窗口到达：仍出现在列表中，且没有 match job。
 - 演练速报在 `IGNORE_TRAINING=true` 时不建档。
 - 过期地震预警仍不建档。

@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn reverse_geocode_query_rejection_uses_the_api_envelope() {
-        let uri = axum::http::Uri::from_static("/api/reverse-geocode?latitude=31.2");
+        let uri = axum::http::Uri::from_static("/api/subscription/reverse-geocode?latitude=31.2");
         let query = Query::<ReverseGeocodeQuery>::try_from_uri(&uri);
         let response = match parse_reverse_geocode_query(query) {
             Ok(_) => panic!("missing longitude should be rejected"),

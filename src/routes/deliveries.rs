@@ -563,7 +563,7 @@ mod tests {
 
     #[test]
     fn invalid_limit_is_rejected_and_empty_admin_key_lists_all() -> anyhow::Result<()> {
-        let uri = axum::http::Uri::from_static("/api/deliveries?limit=0");
+        let uri = axum::http::Uri::from_static("/api/subscription/deliveries?limit=0");
         let query = Query::<DeliveryQuery>::try_from_uri(&uri);
         let Err((status, message)) = parse_delivery_query(query) else {
             anyhow::bail!("limit=0 should be rejected");
@@ -571,7 +571,7 @@ mod tests {
         anyhow::ensure!(status == StatusCode::BAD_REQUEST);
         anyhow::ensure!(message == "limit 必须是 1 到 200 的整数");
 
-        let uri = axum::http::Uri::from_static("/api/admin/deliveries");
+        let uri = axum::http::Uri::from_static("/api/subscription/admin/deliveries");
         let query = Query::<AdminDeliveryQuery>::try_from_uri(&uri);
         let Ok((device_key, limit)) = parse_admin_delivery_query(query) else {
             anyhow::bail!("omitted admin key should list all deliveries");
