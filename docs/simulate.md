@@ -51,17 +51,17 @@ flowchart LR
 
 ## HTTP 与两种互斥模式
 
-`POST /api/simulate` 的查询参数必须二选一，没有默认模式；两个都给或两个都不给 → 400。
+`POST /api/simulate` 的 JSON body 字段必须二选一，没有默认模式；两个都给或两个都不给 → 400。
 
 ### Mode A：`notify_level`
 
-`notify_level=passive|active|critical`（不是 saevio 的 `kind=small|medium|large`）。
+body 中 `notify_level=passive|active|critical`（不是 saevio 的 `kind=small|medium|large`）。
 
 [`simulated_event`](../src/simulate/mod.rs) 按目标订阅的监测点和地震预警烈度带放置假震中，使估算烈度落在该 Bark 中断级别。事件标记 `training: true`。成功时 `event_id` 形如 `SIM-<UTC紧凑时间>`。
 
 ### Mode B：历史目录回放
 
-`source=major` 且 `key=` 为目录条目 id：
+body 中 `source=major` 且 `key=` 为目录条目 id：
 
 | key | 说明 |
 | --- | --- |
@@ -75,7 +75,15 @@ flowchart LR
 
 ### 推送目标
 
-- 必须 JSON `{ "device_ID_list": ["keyA", "keyB"] }`（`deny_unknown_fields`，最多 32 个）。只推列表中的 Key，不会额外广播给其他订阅者。列表里没有订阅的 Key 记入 `skipped`，整次请求仍 200。
+- 必须 JSON body，且 `device_ID_list` 必填（`deny_unknown_fields`，最多 32 个），和模式字段（`notify_level`，或 `source`+`key`）放在同一个 body 里，例如：
+  ```json
+  { "device_ID_list": ["keyA", "keyB"], "notify_level": "active" }
+  ```
+  或
+  ```json
+  { "device_ID_list": ["keyA", "keyB"], "source": "major", "key": "yibin-gaoxian-2026" }
+  ```
+  只推列表中的 Key，不会额外广播给其他订阅者。列表里没有订阅的 Key 记入 `skipped`，整次请求仍 200。
 - 空 body、`{}` 或省略 `device_ID_list` → 400「需要 device_ID_list」。空数组 → 400「device_ID_list 不能为空」。
 - `Authorization: Bearer <bark token>`（而不是服务凭证）→ 401「服务凭证无效」。
 
@@ -146,22 +154,22 @@ cargo test --lib simulate
 curl -sS "http://127.0.0.1:30010/api/status"
 
 # Mode A：按中断级别合成假震中
-curl -sS -X POST "http://127.0.0.1:30010/api/simulate?notify_level=active" \
+curl -sS -X POST "http://127.0.0.1:30010/api/simulate" \
   -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"device_ID_list":["yourBarkKey"]}'
+  -d '{"device_ID_list":["yourBarkKey"],"notify_level":"active"}'
 
 # Mode B：回放宜宾高县
-curl -sS -X POST "http://127.0.0.1:30010/api/simulate?source=major&key=yibin-gaoxian-2026" \
+curl -sS -X POST "http://127.0.0.1:30010/api/simulate" \
   -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"device_ID_list":["yourBarkKey"]}'
+  -d '{"device_ID_list":["yourBarkKey"],"source":"major","key":"yibin-gaoxian-2026"}'
 
 # 只对列表中的 Key 推送（列表里没有订阅的记 skipped）
-curl -sS -X POST "http://127.0.0.1:30010/api/simulate?notify_level=critical" \
+curl -sS -X POST "http://127.0.0.1:30010/api/simulate" \
   -H "Authorization: Bearer $BFF_SERVICE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"device_ID_list":["yourBarkKey"]}'
+  -d '{"device_ID_list":["yourBarkKey"],"notify_level":"critical"}'
 
 # 公开目录；加 Bearer 时带距离/烈度标注
 curl -sS "http://127.0.0.1:30010/api/history?source=major"
@@ -179,6 +187,7 @@ curl -sS "http://127.0.0.1:30010/api/history?source=major" \
 | 400「需要 device_ID_list」 | 写模拟口未带设备列表 |
 | 404「未找到该历史地震」 | `source=major` 但 `key` 不在内置目录 |
 | 400「不支持的历史目录」 | `source` 不是 `major` |
-| 400「查询参数无效」/ 模式相关文案 | `notify_level` 与 `source`/`key` 同时出现或同时缺失 |
+| 400「请求体无效」 | body 不是合法 JSON |
+| 400「notify_level 与 source、key 不能同时使用」/「请指定 notify_level 或 source 与 key」 | `notify_level` 与 `source`/`key` 同时出现或同时缺失 |
 
 仍 404 时看 `GET /api/status` 的 `total_subscriptions`。值为 0 说明订阅没写进当前进程使用的数据库。

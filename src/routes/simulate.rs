@@ -17,17 +17,13 @@ use serde::{Deserialize, Serialize};
 const AUTH_FAILED_MESSAGE: &str = "Bark Key 验证失败";
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct SimulateQuery {
-    notify_level: Option<String>,
-    source: Option<String>,
-    key: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimulateBody {
     #[serde(rename = "device_ID_list")]
     device_id_list: Option<Vec<String>>,
+    notify_level: Option<String>,
+    source: Option<String>,
+    key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,7 +54,6 @@ struct HistoryData {
 pub(crate) async fn simulate_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
-    query: Result<Query<SimulateQuery>, QueryRejection>,
     body: Bytes,
 ) -> impl IntoResponse {
     if let Err((status, message)) = crate::routes::bff_auth::require_bff_service_token(
@@ -67,22 +62,7 @@ pub(crate) async fn simulate_handler(
     ) {
         return (status, Json(ApiResponse::<SimulateData>::error(message)));
     }
-    let Query(query) = match query {
-        Ok(query) => query,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(ApiResponse::<SimulateData>::error("查询参数无效")),
-            );
-        }
-    };
-    let mode = match parse_simulate_mode(&query) {
-        Ok(mode) => mode,
-        Err((status, message)) => {
-            return (status, Json(ApiResponse::<SimulateData>::error(message)));
-        }
-    };
-    let device_list = match parse_simulate_body(&body) {
+    let parsed_body = match parse_simulate_body(&body) {
         Ok(value) => value,
         Err(message) => {
             return (
@@ -91,7 +71,13 @@ pub(crate) async fn simulate_handler(
             );
         }
     };
-    let device_keys = match resolve_device_keys(device_list) {
+    let mode = match parse_simulate_mode(&parsed_body) {
+        Ok(mode) => mode,
+        Err((status, message)) => {
+            return (status, Json(ApiResponse::<SimulateData>::error(message)));
+        }
+    };
+    let device_keys = match resolve_device_keys(parsed_body.device_id_list) {
         Ok(keys) => keys,
         Err(DeviceListError::Missing) => {
             return (
@@ -223,11 +209,11 @@ pub(crate) async fn history_handler(
 }
 
 fn parse_simulate_mode(
-    query: &SimulateQuery,
+    body: &SimulateBody,
 ) -> std::result::Result<SimulateMode, (StatusCode, String)> {
-    let notify_level = nonempty(&query.notify_level);
-    let source = nonempty(&query.source);
-    let key = nonempty(&query.key);
+    let notify_level = nonempty(&body.notify_level);
+    let source = nonempty(&body.source);
+    let key = nonempty(&body.key);
     match (notify_level, source, key) {
         (Some(level), None, None) => parse_notify_level(level)
             .map(SimulateMode::NotifyLevel)
@@ -258,12 +244,16 @@ fn parse_simulate_mode(
     }
 }
 
-fn parse_simulate_body(body: &Bytes) -> std::result::Result<Option<Vec<String>>, &'static str> {
+fn parse_simulate_body(body: &Bytes) -> std::result::Result<SimulateBody, &'static str> {
     if body.is_empty() || body.iter().all(u8::is_ascii_whitespace) {
-        return Ok(None);
+        return Ok(SimulateBody {
+            device_id_list: None,
+            notify_level: None,
+            source: None,
+            key: None,
+        });
     }
-    let parsed = serde_json::from_slice::<SimulateBody>(body).map_err(|_error| "请求体无效")?;
-    Ok(parsed.device_id_list)
+    serde_json::from_slice::<SimulateBody>(body).map_err(|_error| "请求体无效")
 }
 
 fn optional_bearer(
@@ -329,7 +319,7 @@ fn nonempty(value: &Option<String>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        HistoryQuery, SimulateQuery, history_handler, optional_bearer, parse_simulate_body,
+        HistoryQuery, SimulateBody, history_handler, optional_bearer, parse_simulate_body,
         parse_simulate_mode, simulate_handler,
     };
     use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
@@ -458,6 +448,25 @@ mod tests {
         )
     }
 
+    fn simulate_body(
+        keys: &[&str],
+        notify_level: Option<&str>,
+        source: Option<&str>,
+        key: Option<&str>,
+    ) -> Bytes {
+        let mut value = serde_json::json!({ "device_ID_list": keys });
+        if let Some(notify_level) = notify_level {
+            value["notify_level"] = serde_json::json!(notify_level);
+        }
+        if let Some(source) = source {
+            value["source"] = serde_json::json!(source);
+        }
+        if let Some(key) = key {
+            value["key"] = serde_json::json!(key);
+        }
+        Bytes::from(serde_json::to_vec(&value).unwrap_or_default())
+    }
+
     fn bearer_headers(device_key: &str) -> anyhow::Result<HeaderMap> {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -511,25 +520,28 @@ mod tests {
     #[test]
     fn empty_device_list_body_is_rejected_before_dispatch() {
         let body = Bytes::from_static(br#"{"device_ID_list":[]}"#);
-        let parsed = parse_simulate_body(&body);
-        assert_eq!(parsed.ok(), Some(Some(Vec::new())));
+        let parsed = parse_simulate_body(&body).expect("valid json");
+        assert_eq!(parsed.device_id_list, Some(Vec::new()));
     }
 
     #[test]
     fn simulate_modes_are_mutually_exclusive() {
-        let both = parse_simulate_mode(&SimulateQuery {
+        let both = parse_simulate_mode(&SimulateBody {
+            device_id_list: None,
             notify_level: Some("active".to_string()),
             source: Some("major".to_string()),
             key: Some("yibin-gaoxian-2026".to_string()),
         });
         assert!(both.is_err());
-        let neither = parse_simulate_mode(&SimulateQuery {
+        let neither = parse_simulate_mode(&SimulateBody {
+            device_id_list: None,
             notify_level: None,
             source: None,
             key: None,
         });
         assert!(neither.is_err());
-        let history = parse_simulate_mode(&SimulateQuery {
+        let history = parse_simulate_mode(&SimulateBody {
+            device_id_list: None,
             notify_level: None,
             source: Some("major".to_string()),
             key: Some("yibin-gaoxian-2026".to_string()),
@@ -538,7 +550,8 @@ mod tests {
             history,
             Ok(SimulateMode::History { ref key, .. }) if key == "yibin-gaoxian-2026"
         ));
-        let missing = parse_simulate_mode(&SimulateQuery {
+        let missing = parse_simulate_mode(&SimulateBody {
+            device_id_list: None,
             notify_level: None,
             source: Some("major".to_string()),
             key: Some("not-a-real-quake".to_string()),
@@ -547,7 +560,8 @@ mod tests {
             missing.err(),
             Some((StatusCode::NOT_FOUND, "未找到该历史地震".to_string()))
         );
-        let unsupported = parse_simulate_mode(&SimulateQuery {
+        let unsupported = parse_simulate_mode(&SimulateBody {
+            device_id_list: None,
             notify_level: None,
             source: Some("cenc".to_string()),
             key: Some("No1".to_string()),
@@ -564,12 +578,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            device_list_body(&["unknownKey"]),
+            simulate_body(&["unknownKey"], Some("active"), None, None),
         )
         .await
         .into_response();
@@ -588,12 +597,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            device_list_body(&["TARGETKEY"]),
+            simulate_body(&["TARGETKEY"], Some("active"), None, None),
         )
         .await
         .into_response();
@@ -615,12 +619,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            device_list_body(&["pendingKey"]),
+            simulate_body(&["pendingKey"], Some("active"), None, None),
         )
         .await
         .into_response();
@@ -634,18 +633,10 @@ mod tests {
     #[tokio::test]
     async fn simulate_without_bearer_fails() -> anyhow::Result<()> {
         let harness = start_harness().await?;
-        let response = simulate_handler(
-            State(harness.state.clone()),
-            HeaderMap::new(),
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            Bytes::new(),
-        )
-        .await
-        .into_response();
+        let response =
+            simulate_handler(State(harness.state.clone()), HeaderMap::new(), Bytes::new())
+                .await
+                .into_response();
         let (status, body) = json_body(response).await?;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["success"], false);
@@ -660,11 +651,6 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bearer_headers("targetKey")?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
             device_list_body(&["targetKey"]),
         )
         .await
@@ -682,12 +668,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            Bytes::new(),
+            Bytes::from_static(br#"{"notify_level":"active"}"#),
         )
         .await
         .into_response();
@@ -704,12 +685,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            Bytes::from_static(br#"{"device_ID_list":[]}"#),
+            Bytes::from_static(br#"{"device_ID_list":[],"notify_level":"active"}"#),
         )
         .await
         .into_response();
@@ -725,12 +701,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: None,
-                source: Some("major".to_string()),
-                key: Some("does-not-exist".to_string()),
-            })),
-            device_list_body(&["targetKey"]),
+            simulate_body(&["targetKey"], None, Some("major"), Some("does-not-exist")),
         )
         .await
         .into_response();
@@ -746,12 +717,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            device_list_body(&["targetKey"]),
+            simulate_body(&["targetKey"], Some("active"), None, None),
         )
         .await
         .into_response();
@@ -782,12 +748,9 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("critical".to_string()),
-                source: None,
-                key: None,
-            })),
-            Bytes::from_static(br#"{"device_ID_list":["targetKey","missingKey"]}"#),
+            Bytes::from_static(
+                br#"{"device_ID_list":["targetKey","missingKey"],"notify_level":"critical"}"#,
+            ),
         )
         .await
         .into_response();
@@ -806,12 +769,12 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: None,
-                source: Some("major".to_string()),
-                key: Some("yibin-gaoxian-2026".to_string()),
-            })),
-            device_list_body(&["targetKey"]),
+            simulate_body(
+                &["targetKey"],
+                None,
+                Some("major"),
+                Some("yibin-gaoxian-2026"),
+            ),
         )
         .await
         .into_response();
@@ -892,12 +855,7 @@ mod tests {
         let response = simulate_handler(
             State(harness.state.clone()),
             bff_headers()?,
-            Ok(Query(SimulateQuery {
-                notify_level: Some("active".to_string()),
-                source: None,
-                key: None,
-            })),
-            device_list_body(&["targetKey"]),
+            simulate_body(&["targetKey"], Some("active"), None, None),
         )
         .await
         .into_response();
