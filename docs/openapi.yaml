@@ -318,7 +318,7 @@ paths:
       description: |
         旁路测试口：合成一条地震预警或回放内置历史目录，只对显式目标设备调用 Bark，**不会**写入 inbox / 匹配队列 / 投递账本，也不会向全站订阅者扇出。
 
-        模式互斥，必须二选一：
+        模式互斥，必须二选一（均为 JSON body 字段）：
 
         - `notify_level=passive|active|critical`：按每个目标订阅的地点和地震预警烈度带生成能打中该中断级别的假震中。
         - `source=major` 且 `key=` 目录条目 id：回放内置历史大地震（震中/震级用目录，发震时刻视为现在）。第一版只支持 `major`。
@@ -328,28 +328,6 @@ paths:
         架构与测试方法见仓库 `docs/simulate.md`。
       security:
         - bffServiceBearer: []
-      parameters:
-        - name: notify_level
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [passive, active, critical]
-          description: 与 `source`/`key` 互斥。
-        - name: source
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [major]
-          description: 历史目录名，不是 `DisasterEvent.source`。须与 `key` 同时出现。
-        - name: key
-          in: query
-          required: false
-          schema:
-            type: string
-            examples: [yibin-gaoxian-2026, wenchuan-2008, tangshan-1976]
-          description: 历史目录条目 id。
       requestBody:
         required: true
         content:
@@ -361,6 +339,17 @@ paths:
                 summary: 向列表中的 Key 各推一次
                 value:
                   device_ID_list: [exampleKeyA, exampleKeyB]
+              notifyLevel:
+                summary: 按中断级别合成假震中
+                value:
+                  device_ID_list: [exampleKeyA]
+                  notify_level: active
+              historyReplay:
+                summary: 回放内置历史目录
+                value:
+                  device_ID_list: [exampleKeyA]
+                  source: major
+                  key: yibin-gaoxian-2026
       responses:
         "200":
           description: 已向目标设备尝试推送
@@ -755,6 +744,18 @@ components:
             type: string
             pattern: "^[A-Za-z0-9]{1,64}$"
           description: 必填。只向这些 Key 推送。省略或空 body 为 400「需要 device_ID_list」。空数组为 400。
+        notify_level:
+          type: string
+          enum: [passive, active, critical]
+          description: 与 `source`/`key` 互斥。
+        source:
+          type: string
+          enum: [major]
+          description: 历史目录名，不是 `DisasterEvent.source`。须与 `key` 同时出现。
+        key:
+          type: string
+          examples: [yibin-gaoxian-2026, wenchuan-2008, tangshan-1976]
+          description: 历史目录条目 id。
     SimulateApiResponse:
       type: object
       additionalProperties: false
