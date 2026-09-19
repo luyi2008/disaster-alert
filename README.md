@@ -328,5 +328,4 @@ cargo test --all-targets
 
 - 数据源：[wolfx.jp](https://ws-api.wolfx.jp)
 - 数据源：[FAN Studio](https://api.fanstudio.tech/doc/ws-api/#home)
-- 数据源：[成都高新减灾研究所](http://www.365icl.com/) / [成都市美幻科技有限公司](http://www.huania.com/)
 - 推送服务：[Bark](https://github.com/Finb/Bark)
