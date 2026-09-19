@@ -21,8 +21,6 @@
 - 第一版历史目录只有 `source=major`，没有 Wolfx `cenc` / `jma` 列表
 - 不改 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)
 
-`POST /api/simulate` **不**要求 `INSTANCE_TERMS_ACCEPTED`。创建订阅的 `POST /api/subscribe` 仍然要求该门禁。
-
 ## 数据流
 
 直播 EEW 与模拟旁路共用 `BarkNotifier` 和订阅存储，入队路径完全分开。
@@ -145,7 +143,7 @@ cargo test --lib simulate
 
 ## 手动测试
 
-默认监听 `http://127.0.0.1:30010`。先 `cp .env.example .env`，填写 `ALERT_SIGNING_KEY` 与 `BFF_SERVICE_TOKEN`，并设 `INSTANCE_TERMS_ACCEPTED=true`（否则无法订阅）。不要让 Docker 与本机 `cargo run` 共用同一 `DB_PATH` 却打错端口。
+默认监听 `http://127.0.0.1:30010`。先 `cp .env.example .env`，填写 `ALERT_SIGNING_KEY` 与 `BFF_SERVICE_TOKEN`。不要让 Docker 与本机 `cargo run` 共用同一 `DB_PATH` 却打错端口。
 
 用**本实例**刚订阅成功的同一把 Key（下面用 `yourBarkKey` 占位，换成你的测试 Key，不要把真实 Key 提交进仓库）：
 

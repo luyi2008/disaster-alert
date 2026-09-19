@@ -30,7 +30,6 @@ paths:
       summary: 创建或覆盖订阅
       description: |
         创建订阅并向 Bark 目标发送确认通知。
-        仅在实例设置 `INSTANCE_TERMS_ACCEPTED=true` 时可用。
         浏览器不得用 Bark token 当写凭证；必须带 BFF 服务凭证。
       security:
         - bffServiceBearer: []
@@ -155,7 +154,7 @@ paths:
         返回本实例中、对**当前** `Authorization: Bearer` Bark Key 仍然激活的订阅（地点与规则）。
         同一 Key 挂在多个 Bark URL 上时会返回多条。本接口不是运营全站查询，不能用空 Key 列出其他订阅者。
 
-        只包含已激活订阅。待确认、已取消或不存在的 Key 仍返回 HTTP 200，且 `success` 为 false，避免客户端把业务未命中当成错误弹 toast。不要求 `INSTANCE_TERMS_ACCEPTED`。
+        只包含已激活订阅。待确认、已取消或不存在的 Key 仍返回 HTTP 200，且 `success` 为 false，避免客户端把业务未命中当成错误弹 toast。
       security:
         - barkBearer: []
       responses:
@@ -1354,11 +1353,8 @@ components:
     Status:
       type: object
       additionalProperties: false
-      required: [instance_terms_accepted, total_subscriptions, wolfx, fanstudio, durable, ready_queues]
+      required: [total_subscriptions, wolfx, fanstudio, durable, ready_queues]
       properties:
-        instance_terms_accepted:
-          type: boolean
-          description: 实例是否已设置 `INSTANCE_TERMS_ACCEPTED=true`。
         total_subscriptions:
           type: integer
           minimum: 0

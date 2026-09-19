@@ -29,11 +29,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 const MAX_LOCATIONS: usize = 3;
 const MAX_LOCATION_NAME_CHARS: usize = 80;
-const INSTANCE_TERMS_REQUIRED_MESSAGE: &str = "当前实例尚未确认部署责任，暂不接受新增或覆盖订阅";
 
 #[derive(Clone)]
 pub(crate) struct AppState {
-    pub(crate) instance_terms_accepted: bool,
     pub(crate) storage: Storage,
     pub(crate) subscriptions: SubscriptionManager,
     pub(crate) bark_notifier: BarkNotifier,
@@ -65,7 +63,6 @@ impl AppState {
         let subscriptions = storage.subscription_manager();
         let bark_urls = bark_notifier.allowed_bark_urls();
         Self {
-            instance_terms_accepted: false,
             storage,
             subscriptions,
             bark_notifier,
@@ -89,11 +86,6 @@ impl AppState {
                 "test-bff-service-token".to_string(),
             ),
         }
-    }
-
-    pub(crate) fn with_instance_terms_accepted(mut self, accepted: bool) -> Self {
-        self.instance_terms_accepted = accepted;
-        self
     }
 
     pub(crate) fn with_huania_enabled(mut self, enabled: bool) -> Self {
@@ -183,9 +175,6 @@ pub(crate) async fn subscribe_handler(
             status,
             Json(ApiResponse::<SubscribeResponse>::error(message)),
         );
-    }
-    if let Err(response) = require_subscription_creation_enabled(state.instance_terms_accepted) {
-        return response;
     }
     let Json(payload) = match payload {
         Ok(payload) => payload,
@@ -342,19 +331,6 @@ pub(crate) async fn subscribe_handler(
                 )),
             )
         }
-    }
-}
-
-fn require_subscription_creation_enabled(
-    instance_terms_accepted: bool,
-) -> std::result::Result<(), (StatusCode, Json<ApiResponse<SubscribeResponse>>)> {
-    if instance_terms_accepted {
-        Ok(())
-    } else {
-        Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ApiResponse::error(INSTANCE_TERMS_REQUIRED_MESSAGE)),
-        ))
     }
 }
 
@@ -557,7 +533,6 @@ pub(crate) struct BarkUrlsResponse {
 
 #[derive(Serialize)]
 struct StatusResponse {
-    instance_terms_accepted: bool,
     total_subscriptions: usize,
     #[serde(flatten)]
     runtime: RuntimeStatusSnapshot,
@@ -611,7 +586,6 @@ pub(crate) async fn status_handler(State(state): State<AppState>) -> impl IntoRe
             Json(ApiResponse::success(
                 "运行状态获取成功",
                 Some(StatusResponse {
-                    instance_terms_accepted: state.instance_terms_accepted,
                     total_subscriptions,
                     runtime: state.runtime_status.snapshot(durable, state.huania_enabled),
                 }),
@@ -705,29 +679,13 @@ mod tests {
     }
 
     #[test]
-    fn subscription_creation_requires_accepted_instance_terms() {
-        assert!(require_subscription_creation_enabled(true).is_ok());
-
-        let result = require_subscription_creation_enabled(false);
-        assert!(result.is_err());
-        if let Err((status, Json(response))) = result {
-            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
-            assert!(!response.success);
-            assert_eq!(response.message, INSTANCE_TERMS_REQUIRED_MESSAGE);
-            assert!(response.data.is_none());
-        }
-    }
-
-    #[test]
     fn status_response_omits_huania_when_disabled() {
         let response = StatusResponse {
-            instance_terms_accepted: true,
             total_subscriptions: 12,
             runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default(), false),
         };
         let value = serde_json::to_value(response).expect("status response should serialize");
 
-        assert_eq!(value["instance_terms_accepted"], true);
         assert_eq!(value["total_subscriptions"], 12);
         assert!(value.get("wolfx").is_some());
         assert!(value.get("fanstudio").is_some());
@@ -740,7 +698,6 @@ mod tests {
     #[test]
     fn status_response_includes_huania_when_enabled() {
         let response = StatusResponse {
-            instance_terms_accepted: true,
             total_subscriptions: 12,
             runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default(), true),
         };
@@ -752,22 +709,13 @@ mod tests {
         assert!(value.get("runtime").is_none());
     }
 
-    fn bff_headers() -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_static("Bearer test-bff-service-token"),
-        );
-        headers
-    }
-
     fn bark_headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer abc123"));
         headers
     }
 
-    fn test_state(terms_accepted: bool) -> anyhow::Result<(AppState, tempfile::TempDir)> {
+    fn test_state() -> anyhow::Result<(AppState, tempfile::TempDir)> {
         let directory = tempfile::tempdir()?;
         let storage = Storage::open(directory.path())?;
         let notifier = BarkNotifier::new(
@@ -790,8 +738,7 @@ mod tests {
             links,
             confirmations,
             4,
-        )
-        .with_instance_terms_accepted(terms_accepted);
+        );
         Ok((state, directory))
     }
 
@@ -805,7 +752,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_without_service_token_is_unauthorized() -> anyhow::Result<()> {
-        let (state, _directory) = test_state(true)?;
+        let (state, _directory) = test_state()?;
         let response = subscribe_handler(State(state), HeaderMap::new(), Ok(Json(request())))
             .await
             .into_response();
@@ -818,7 +765,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_with_bark_bearer_is_unauthorized() -> anyhow::Result<()> {
-        let (state, _directory) = test_state(true)?;
+        let (state, _directory) = test_state()?;
         let response = subscribe_handler(State(state), bark_headers(), Ok(Json(request())))
             .await
             .into_response();
@@ -829,37 +776,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_checks_instance_terms_after_service_token() -> anyhow::Result<()> {
-        let (state, _directory) = test_state(false)?;
-        let response = subscribe_handler(State(state), bff_headers(), Ok(Json(request())))
-            .await
-            .into_response();
-        let (status, body) = json_body(response).await?;
-        anyhow::ensure!(status == StatusCode::SERVICE_UNAVAILABLE);
-        anyhow::ensure!(body["message"] == INSTANCE_TERMS_REQUIRED_MESSAGE);
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn subscribe_accepts_x_bff_service_token_without_authorization() -> anyhow::Result<()> {
-        let (state, _directory) = test_state(false)?;
+        let (state, _directory) = test_state()?;
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-bff-service-token",
             HeaderValue::from_static("test-bff-service-token"),
         );
-        let response = subscribe_handler(State(state), headers, Ok(Json(request())))
+        let mut payload = request();
+        payload.destination = NotificationDestination::Bark {
+            base_url: "https://api.day.app".to_string(),
+            device_key: "invalid key!".to_string(),
+        };
+        let response = subscribe_handler(State(state), headers, Ok(Json(payload)))
             .await
             .into_response();
         let (status, body) = json_body(response).await?;
-        anyhow::ensure!(status == StatusCode::SERVICE_UNAVAILABLE);
-        anyhow::ensure!(body["message"] == INSTANCE_TERMS_REQUIRED_MESSAGE);
+        anyhow::ensure!(status == StatusCode::BAD_REQUEST);
+        anyhow::ensure!(body["message"] == "Bark Key 只能包含字母、数字");
         Ok(())
     }
 
     #[tokio::test]
     async fn unsubscribe_without_service_token_is_unauthorized() -> anyhow::Result<()> {
-        let (state, _directory) = test_state(true)?;
+        let (state, _directory) = test_state()?;
         let payload = UnsubscribeRequest {
             destination: NotificationDestination::Bark {
                 base_url: "https://api.day.app".to_string(),
