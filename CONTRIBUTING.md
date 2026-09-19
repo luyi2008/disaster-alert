@@ -4,13 +4,7 @@
 
 ## 分支命名
 
-`main` 是唯一长期分支，不直接在 `main` 上开发。新分支从 `main` 切出，命名格式为 `<类型>/<简短描述>`：
-
-- 类型限定为 `feature`（新功能）、`fix`（缺陷修复）、`docs`（仅文档）、`refactor`（不改变行为的重构）、`chore`（依赖、构建、CI 等杂项）、`test` 之一
-- `<简短描述>` 用小写英文单词加短横线连接，概括改动内容，不用中文、下划线、驼峰或空格
-- 关联 issue 时把编号放在描述末尾，用短横线分隔，例如 `fix/subscribe-500-error-42`
-
-示例：`feature/bark-key-mask`、`fix/subscription-duplicate-push`、`docs/branch-naming`、`refactor/event-runtime-split`、`chore/upgrade-tokio`
+见 [.claude/rules/git.md](.claude/rules/git.md)。
 
 ## 改动边界
 
