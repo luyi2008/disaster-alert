@@ -59,7 +59,6 @@ async fn run() -> Result<()> {
     let config = Config::from_env().context("failed to load configuration")?;
     tracing::info!(
         event = "config.loaded",
-        instance_terms_accepted = config.instance_terms_accepted,
         server_host = %config.server_host,
         server_port = config.server_port,
         db_path = %config.db_path,
@@ -68,13 +67,6 @@ async fn run() -> Result<()> {
         huania_enabled = config.huania_enabled,
         "config.loaded"
     );
-    if !config.instance_terms_accepted {
-        tracing::warn!(
-            event = "config.instance_terms_not_accepted",
-            variable = "INSTANCE_TERMS_ACCEPTED",
-            "config.instance_terms_not_accepted"
-        );
-    }
 
     let db_path = config.db_path.clone();
     let storage = tokio::task::spawn_blocking(move || Storage::open(db_path))
@@ -136,7 +128,6 @@ async fn run() -> Result<()> {
         subscription_confirmations.clone(),
         config.max_concurrent_notifications,
     )
-    .with_instance_terms_accepted(config.instance_terms_accepted)
     .with_huania_enabled(config.huania_enabled)
     .with_wave_speeds(config.p_wave_km_s, config.s_wave_km_s)
     .with_bff_service_token(config.bff_service_token.clone());

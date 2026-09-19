@@ -16,9 +16,6 @@ if [ ! -f .env ]; then
   key="$(openssl rand 32 | base64 | tr '+/' '-_' | tr -d '=\n')"
   sed -i "s|^ALERT_SIGNING_KEY=.*|ALERT_SIGNING_KEY=${key}|" .env
   sed -i "s|^ALERT_DETAIL_BASE_URL=.*|ALERT_DETAIL_BASE_URL=http://127.0.0.1:30010|" .env
-  # Local development only: accept the terms flag so subscribe endpoints are
-  # testable. Real deployments must set this deliberately (see README.md).
-  sed -i "s|^INSTANCE_TERMS_ACCEPTED=.*|INSTANCE_TERMS_ACCEPTED=true|" .env
 fi
 
 # Pre-build the binary so the first `cargo run` in the terminal starts quickly.
