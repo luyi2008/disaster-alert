@@ -1,6 +1,6 @@
 use crate::models::{
-    ApiResponse, DisasterCategory, DisasterEvent, IncidentRecord, IncidentReportSummary,
-    ProviderChannel,
+    ApiResponse, DisasterCategory, DisasterEvent, IncidentId, IncidentRecord,
+    IncidentReportSummary, ProviderChannel,
 };
 use crate::routes::AppState;
 use axum::{
@@ -14,29 +14,34 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_LIMIT: u16 = 50;
 const MAX_LIMIT: u16 = 200;
 
+type EventCursor = (i64, String);
+
 #[derive(Deserialize)]
-pub(crate) struct AdminEventQuery {
+pub(crate) struct EventQuery {
     limit: Option<u16>,
+    cursor: Option<String>,
 }
 
 #[derive(Serialize)]
 struct EventsResponse {
-    events: Vec<AdminIncidentView>,
+    events: Vec<IncidentView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_cursor: Option<String>,
 }
 
 #[derive(Serialize)]
-struct AdminIncidentView {
+struct IncidentView {
     incident_id: String,
     category: DisasterCategory,
     first_seen_at_ms: i64,
     updated_at_ms: i64,
     has_matched_subscribers: bool,
-    latest: Vec<AdminEventView>,
+    latest: Vec<EventView>,
     timeline: Vec<IncidentReportSummary>,
 }
 
 #[derive(Serialize)]
-struct AdminEventView {
+struct EventView {
     category: DisasterCategory,
     channel: ProviderChannel,
     source: String,
@@ -58,7 +63,7 @@ struct AdminEventView {
     training: bool,
 }
 
-impl From<IncidentRecord> for AdminIncidentView {
+impl From<IncidentRecord> for IncidentView {
     fn from(incident: IncidentRecord) -> Self {
         Self {
             incident_id: incident.id.as_str().to_string(),
@@ -69,14 +74,14 @@ impl From<IncidentRecord> for AdminIncidentView {
             latest: incident
                 .latest_by_source
                 .into_iter()
-                .map(AdminEventView::from)
+                .map(EventView::from)
                 .collect(),
             timeline: incident.timeline.into_iter().collect(),
         }
     }
 }
 
-impl From<DisasterEvent> for AdminEventView {
+impl From<DisasterEvent> for EventView {
     fn from(event: DisasterEvent) -> Self {
         Self {
             category: event.category,
@@ -102,20 +107,21 @@ impl From<DisasterEvent> for AdminEventView {
     }
 }
 
-pub(crate) async fn admin_events_handler(
+pub(crate) async fn events_handler(
     State(state): State<AppState>,
-    query: Result<Query<AdminEventQuery>, QueryRejection>,
+    query: Result<Query<EventQuery>, QueryRejection>,
 ) -> impl IntoResponse {
-    let limit = match parse_admin_event_query(query) {
-        Ok(limit) => limit,
+    let (limit, cursor) = match parse_event_query(query) {
+        Ok(parsed) => parsed,
         Err((status, message)) => {
             return (status, Json(ApiResponse::<EventsResponse>::error(message)));
         }
     };
     tracing::info!(
-        event = "event.admin_lookup_requested",
+        event = "event.lookup_requested",
         limit,
-        "event.admin_lookup_requested"
+        has_cursor = cursor.is_some(),
+        "event.lookup_requested"
     );
     let Ok(permit) = state.storage_concurrency.clone().try_acquire_owned() else {
         return (
@@ -128,24 +134,35 @@ pub(crate) async fn admin_events_handler(
     let storage = state.storage.clone();
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        storage.recent_incidents(limit)
+        storage.recent_incidents(limit + 1, cursor)
     })
     .await;
     match result {
-        Ok(Ok(incidents)) => (
-            StatusCode::OK,
-            Json(ApiResponse::success(
-                "事件详情获取成功",
-                Some(EventsResponse {
-                    events: incidents.into_iter().map(AdminIncidentView::from).collect(),
-                }),
-            )),
-        ),
+        Ok(Ok(mut incidents)) => {
+            let next_cursor = if incidents.len() > limit {
+                incidents.truncate(limit);
+                incidents
+                    .last()
+                    .map(|incident| encode_cursor(incident.updated_at_ms, &incident.id))
+            } else {
+                None
+            };
+            (
+                StatusCode::OK,
+                Json(ApiResponse::success(
+                    "事件详情获取成功",
+                    Some(EventsResponse {
+                        events: incidents.into_iter().map(IncidentView::from).collect(),
+                        next_cursor,
+                    }),
+                )),
+            )
+        }
         Ok(Err(error)) => {
             tracing::error!(
-                event = "event.admin_lookup_failed",
+                event = "event.lookup_failed",
                 error = ?error,
-                "event.admin_lookup_failed"
+                "event.lookup_failed"
             );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -154,9 +171,9 @@ pub(crate) async fn admin_events_handler(
         }
         Err(error) => {
             tracing::error!(
-                event = "event.admin_lookup_task_failed",
+                event = "event.lookup_task_failed",
                 error = ?error,
-                "event.admin_lookup_task_failed"
+                "event.lookup_task_failed"
             );
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -166,9 +183,20 @@ pub(crate) async fn admin_events_handler(
     }
 }
 
-fn parse_admin_event_query(
-    query: Result<Query<AdminEventQuery>, QueryRejection>,
-) -> Result<usize, (StatusCode, String)> {
+fn encode_cursor(updated_at_ms: i64, incident_id: &IncidentId) -> String {
+    format!("{updated_at_ms}_{}", incident_id.as_str())
+}
+
+fn decode_cursor(raw: &str) -> Option<EventCursor> {
+    let (updated_at_ms, incident_id) = raw.split_once('_')?;
+    let updated_at_ms = updated_at_ms.parse::<i64>().ok()?;
+    let incident_id = IncidentId::parse(incident_id)?;
+    Some((updated_at_ms, incident_id.as_str().to_string()))
+}
+
+fn parse_event_query(
+    query: Result<Query<EventQuery>, QueryRejection>,
+) -> Result<(usize, Option<EventCursor>), (StatusCode, String)> {
     let Query(query) =
         query.map_err(|_rejection| (StatusCode::BAD_REQUEST, "查询参数无效".to_string()))?;
     let limit = query.limit.unwrap_or(DEFAULT_LIMIT);
@@ -178,12 +206,18 @@ fn parse_admin_event_query(
             "limit 必须是 1 到 200 的整数".to_string(),
         ));
     }
-    Ok(usize::from(limit))
+    let cursor = match query.cursor {
+        Some(raw) if !raw.is_empty() => {
+            Some(decode_cursor(&raw).ok_or((StatusCode::BAD_REQUEST, "cursor 无效".to_string()))?)
+        }
+        _ => None,
+    };
+    Ok((usize::from(limit), cursor))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AdminEventQuery, admin_events_handler, parse_admin_event_query};
+    use super::{EventQuery, events_handler, parse_event_query};
     use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
     use crate::events::EventCoordinator;
     use crate::models::{DisasterCategory, DisasterEvent, ProviderChannel};
@@ -279,19 +313,24 @@ mod tests {
         Ok(serde_json::from_slice(&body)?)
     }
 
+    fn query(limit: Option<u16>, cursor: Option<&str>) -> Query<EventQuery> {
+        Query(EventQuery {
+            limit,
+            cursor: cursor.map(str::to_string),
+        })
+    }
+
     #[tokio::test]
     async fn empty_store_returns_an_empty_event_list() -> anyhow::Result<()> {
         let harness = harness()?;
-        let response = admin_events_handler(
-            State(harness.state),
-            Ok(Query(AdminEventQuery { limit: None })),
-        )
-        .await
-        .into_response();
+        let response = events_handler(State(harness.state), Ok(query(None, None)))
+            .await
+            .into_response();
         anyhow::ensure!(response.status() == StatusCode::OK);
         let body = json_body(response).await?;
         anyhow::ensure!(body["success"] == true);
         anyhow::ensure!(body["data"]["events"] == serde_json::json!([]));
+        anyhow::ensure!(body["data"]["next_cursor"].is_null());
         Ok(())
     }
 
@@ -308,12 +347,9 @@ mod tests {
             report("newer-quake", "newer", 25.0, 80.0, "2026-06-01T00:00:00Z"),
         )?;
 
-        let response = admin_events_handler(
-            State(harness.state),
-            Ok(Query(AdminEventQuery { limit: None })),
-        )
-        .await
-        .into_response();
+        let response = events_handler(State(harness.state), Ok(query(None, None)))
+            .await
+            .into_response();
         anyhow::ensure!(response.status() == StatusCode::OK);
         let body = json_body(response).await?;
         let events = body["data"]["events"]
@@ -326,6 +362,7 @@ mod tests {
         anyhow::ensure!(events[0]["latest"][0]["longitude"] == 80.0);
         anyhow::ensure!(events[0]["latest"][0]["description"] == "newer description");
         anyhow::ensure!(events[1]["latest"][0]["title"] == "older");
+        anyhow::ensure!(body["data"]["next_cursor"].is_null());
         Ok(())
     }
 
@@ -341,12 +378,9 @@ mod tests {
         update.revision = "2".to_string();
         ingest(&harness.state, update)?;
 
-        let response = admin_events_handler(
-            State(harness.state.clone()),
-            Ok(Query(AdminEventQuery { limit: Some(1) })),
-        )
-        .await
-        .into_response();
+        let response = events_handler(State(harness.state.clone()), Ok(query(Some(1), None)))
+            .await
+            .into_response();
         anyhow::ensure!(response.status() == StatusCode::OK);
         let body = json_body(response).await?;
         let events = body["data"]["events"]
@@ -365,15 +399,78 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn cursor_walks_through_pages_without_overlap_or_gaps() -> anyhow::Result<()> {
+        let harness = harness()?;
+        for index in 0..5 {
+            ingest(
+                &harness.state,
+                report(
+                    &format!("quake-{index}"),
+                    &format!("title-{index}"),
+                    30.0,
+                    100.0,
+                    "2026-01-01T00:00:00Z",
+                ),
+            )?;
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+
+        let mut seen_titles = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let response = events_handler(
+                State(harness.state.clone()),
+                Ok(query(Some(2), cursor.as_deref())),
+            )
+            .await
+            .into_response();
+            anyhow::ensure!(response.status() == StatusCode::OK);
+            let body = json_body(response).await?;
+            let events = body["data"]["events"]
+                .as_array()
+                .context("missing events")?;
+            for event in events {
+                seen_titles.push(
+                    event["latest"][0]["title"]
+                        .as_str()
+                        .context("missing title")?
+                        .to_string(),
+                );
+            }
+            cursor = body["data"]["next_cursor"].as_str().map(str::to_string);
+            if cursor.is_none() {
+                break;
+            }
+        }
+
+        anyhow::ensure!(
+            seen_titles == vec!["title-4", "title-3", "title-2", "title-1", "title-0",]
+        );
+        Ok(())
+    }
+
     #[test]
     fn invalid_limit_is_rejected() -> anyhow::Result<()> {
-        let uri = axum::http::Uri::from_static("/api/admin/events?limit=0");
-        let query = Query::<AdminEventQuery>::try_from_uri(&uri);
-        let Err((status, message)) = parse_admin_event_query(query) else {
+        let uri = axum::http::Uri::from_static("/api/events?limit=0");
+        let parsed = Query::<EventQuery>::try_from_uri(&uri);
+        let Err((status, message)) = parse_event_query(parsed) else {
             anyhow::bail!("limit=0 should be rejected");
         };
         anyhow::ensure!(status == StatusCode::BAD_REQUEST);
         anyhow::ensure!(message == "limit 必须是 1 到 200 的整数");
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_cursor_is_rejected() -> anyhow::Result<()> {
+        let uri = axum::http::Uri::from_static("/api/events?cursor=not-a-cursor");
+        let parsed = Query::<EventQuery>::try_from_uri(&uri);
+        let Err((status, message)) = parse_event_query(parsed) else {
+            anyhow::bail!("malformed cursor should be rejected");
+        };
+        anyhow::ensure!(status == StatusCode::BAD_REQUEST);
+        anyhow::ensure!(message == "cursor 无效");
         Ok(())
     }
 }
