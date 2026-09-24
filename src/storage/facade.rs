@@ -57,8 +57,12 @@ impl Storage {
         Ok(self.inner.incident(id)?.map(Arc::new))
     }
 
-    pub(crate) fn recent_incidents(&self, limit: usize) -> Result<Vec<IncidentRecord>> {
-        self.inner.recent_incidents(limit)
+    pub(crate) fn recent_incidents(
+        &self,
+        limit: usize,
+        before: Option<(i64, String)>,
+    ) -> Result<Vec<IncidentRecord>> {
+        self.inner.recent_incidents(limit, before)
     }
 
     pub(crate) fn backlog_counts(&self) -> Result<BacklogCounts> {

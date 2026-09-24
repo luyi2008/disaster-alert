@@ -341,7 +341,11 @@ impl FjallStorage {
         get_record(&self.incidents, id.as_str().as_bytes())
     }
 
-    pub(crate) fn recent_incidents(&self, limit: usize) -> Result<Vec<IncidentRecord>> {
+    pub(crate) fn recent_incidents(
+        &self,
+        limit: usize,
+        before: Option<(i64, String)>,
+    ) -> Result<Vec<IncidentRecord>> {
         anyhow::ensure!(limit > 0, "incident query limit must be positive");
         let mut incidents = Vec::<IncidentRecord>::new();
         for item in self.incidents.iter() {
@@ -353,6 +357,12 @@ impl FjallStorage {
                 .cmp(&left.updated_at_ms)
                 .then_with(|| right.id.as_str().cmp(left.id.as_str()))
         });
+        if let Some((cursor_updated_at_ms, cursor_incident_id)) = before {
+            incidents.retain(|incident| {
+                (incident.updated_at_ms, incident.id.as_str())
+                    < (cursor_updated_at_ms, cursor_incident_id.as_str())
+            });
+        }
         incidents.truncate(limit);
         Ok(incidents)
     }
@@ -3353,7 +3363,7 @@ mod tests {
     fn recent_incidents_are_newest_first_and_respect_limit() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = FjallStorage::open(directory.path())?;
-        anyhow::ensure!(storage.recent_incidents(50)?.is_empty());
+        anyhow::ensure!(storage.recent_incidents(50, None)?.is_empty());
 
         let coordinator = EventCoordinator::new(storage.clone());
         let mut first = correlated_event();
@@ -3375,12 +3385,17 @@ mod tests {
         storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![second], None)?;
         coordinator.process_next()?.context("missing second job")?;
 
-        let listed = storage.recent_incidents(50)?;
+        let listed = storage.recent_incidents(50, None)?;
         anyhow::ensure!(listed.len() == 2);
         anyhow::ensure!(listed[0].latest_by_source[0].title == "newer");
         anyhow::ensure!(listed[1].latest_by_source[0].title == "older");
-        anyhow::ensure!(storage.recent_incidents(1)?.len() == 1);
-        anyhow::ensure!(storage.recent_incidents(1)?[0].latest_by_source[0].title == "newer");
+        anyhow::ensure!(storage.recent_incidents(1, None)?.len() == 1);
+        anyhow::ensure!(storage.recent_incidents(1, None)?[0].latest_by_source[0].title == "newer");
+
+        let cursor = (listed[0].updated_at_ms, listed[0].id.as_str().to_string());
+        let after_cursor = storage.recent_incidents(50, Some(cursor))?;
+        anyhow::ensure!(after_cursor.len() == 1);
+        anyhow::ensure!(after_cursor[0].latest_by_source[0].title == "older");
 
         let mut update = correlated_event();
         update.event_id = "newer-quake".to_string();
@@ -3392,7 +3407,7 @@ mod tests {
         update.longitude = Some(80.0);
         storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![update], None)?;
         coordinator.process_next()?;
-        let after_update = storage.recent_incidents(50)?;
+        let after_update = storage.recent_incidents(50, None)?;
         anyhow::ensure!(after_update.len() == 2);
         anyhow::ensure!(after_update[0].latest_by_source[0].title == "newer-update");
         anyhow::ensure!(after_update[0].latest_by_source[0].report_num == 2);

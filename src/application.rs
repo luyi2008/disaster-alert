@@ -4,7 +4,7 @@ use crate::lifecycle;
 use crate::providers::{FanStudioSource, HuaniaSource, WolfxSource};
 use crate::routes::{
     AppState, ReverseGeocoder, admin_deliveries_handler, admin_device_keys_handler,
-    admin_events_handler, admin_subscriptions_handler, bark_urls_handler, deliveries_handler,
+    admin_subscriptions_handler, bark_urls_handler, deliveries_handler, events_handler,
     health_handler, history_handler, incident_detail_handler, reverse_geocode_handler,
     simulate_handler, status_handler, subscribe_handler, subscription_options_handler,
     subscriptions_handler, unsubscribe_handler,
@@ -163,12 +163,12 @@ async fn run() -> Result<()> {
             post(simulate_handler).layer(DefaultBodyLimit::max(SIMULATE_BODY_LIMIT_BYTES)),
         )
         .route("/history", get(history_handler))
+        .route("/events", get(events_handler))
         .route("/deliveries", get(deliveries_handler))
         .route("/subscriptions", get(subscriptions_handler))
         .route("/admin/device-keys", get(admin_device_keys_handler))
         .route("/admin/subscriptions", get(admin_subscriptions_handler))
-        .route("/admin/deliveries", get(admin_deliveries_handler))
-        .route("/admin/events", get(admin_events_handler));
+        .route("/admin/deliveries", get(admin_deliveries_handler));
 
     let app = Router::new()
         .route("/health", get(health_handler))

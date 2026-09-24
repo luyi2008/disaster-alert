@@ -1,17 +1,17 @@
-mod admin_events;
 mod admin_subscriptions;
 mod bff_auth;
 mod deliveries;
+mod events;
 mod incident;
 mod reverse_geocoder;
 mod simulate;
 mod subscribe;
 
-pub(crate) use admin_events::admin_events_handler;
 pub(crate) use admin_subscriptions::{
     admin_device_keys_handler, admin_subscriptions_handler, subscriptions_handler,
 };
 pub(crate) use deliveries::{admin_deliveries_handler, deliveries_handler};
+pub(crate) use events::events_handler;
 pub(crate) use incident::incident_detail_handler;
 pub(crate) use reverse_geocoder::{ReverseGeocodeResult, ReverseGeocoder};
 pub(crate) use simulate::{history_handler, simulate_handler};

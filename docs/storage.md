@@ -99,7 +99,7 @@ flowchart LR
 
 ## 什么会留下
 
-不是「台网全量历史都在库里」。地震速报只要本进程接入过，就会留下 incident 档案，**不要求**当时有订阅命中。`GET /api/admin/events` 列出这些记录；`has_matched_subscribers` 区分「接入了」和「有人收到」。
+不是「台网全量历史都在库里」。地震速报只要本进程接入过，就会留下 incident 档案，**不要求**当时有订阅命中。`GET /api/events` 列出这些记录（支持 `limit` + `cursor` 游标翻页）；`has_matched_subscribers` 区分「接入了」和「有人收到」。
 
 预警、气象、海啸、台风未命中时仍不建档。下列情况也不会长期写入 `incidents`：
 
