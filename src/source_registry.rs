@@ -142,6 +142,7 @@ pub(crate) fn find_provider(
 pub(crate) fn category_options(huania_enabled: bool) -> Vec<CategoryOption> {
     DisasterCategory::ALL
         .into_iter()
+        .filter(|category| *category != DisasterCategory::EarthquakeReport)
         .map(|category| {
             let mut source_groups = Vec::<SourceGroup>::new();
             for source in SOURCES.iter().filter(|source| source.category == category) {
@@ -216,7 +217,10 @@ mod tests {
                 .flat_map(|category| &category.source_groups)
                 .map(|group| group.sources.len())
                 .sum::<usize>(),
-            SOURCES.len()
+            SOURCES
+                .iter()
+                .filter(|source| source.category != DisasterCategory::EarthquakeReport)
+                .count()
         );
     }
 
@@ -230,8 +234,20 @@ mod tests {
             ids.len(),
             SOURCES
                 .iter()
-                .filter(|source| source.channel != ProviderChannel::Huania)
+                .filter(|source| source.channel != ProviderChannel::Huania
+                    && source.category != DisasterCategory::EarthquakeReport)
                 .count()
+        );
+    }
+
+    #[test]
+    fn earthquake_report_is_not_offered_as_a_subscription_option() {
+        let ids = source_ids(&category_options(true));
+        assert!(!ids.contains(&"wolfx.cenc_eqlist"));
+        assert!(
+            !category_options(true)
+                .iter()
+                .any(|category| category.id == DisasterCategory::EarthquakeReport.as_str())
         );
     }
 
