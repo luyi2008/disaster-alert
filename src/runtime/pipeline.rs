@@ -498,6 +498,10 @@ impl EventRuntime {
             let event = storage
                 .event(job.event_revision)?
                 .context("MatchJob references missing event")?;
+            if event.category.is_retired() {
+                storage.commit_match_batches(job.id, &[])?;
+                return Ok(Vec::new());
+            }
             let category = event.category;
             let mut rows = if event.cancel {
                 cancellation_rows(storage.delivered_rows(&job.incident_id, event.category)?)
@@ -1174,6 +1178,9 @@ impl EventRuntime {
         batch: &DeliveryBatch,
         row_index: u32,
     ) -> std::result::Result<Option<DeliverySuccess>, BarkDeliveryError> {
+        if event.category.is_retired() || batch.category.is_retired() {
+            return Ok(None);
+        }
         let storage = self.inner.storage.clone();
         let incident_id = batch.incident_id.clone();
         let category = batch.category;

@@ -13,13 +13,15 @@ pub enum DisasterCategory {
 }
 
 impl DisasterCategory {
-    pub const ALL: [Self; 5] = [
-        Self::EarthquakeWarning,
-        Self::EarthquakeReport,
-        Self::WeatherWarning,
-        Self::Tsunami,
-        Self::Typhoon,
-    ];
+    /// Categories offered to new subscriptions and subscription options.
+    ///
+    /// Weather, tsunami, and typhoon stay in the enum so existing Fjall records
+    /// and notification snapshots still decode. They are not selectable.
+    pub const ALL: [Self; 2] = [Self::EarthquakeWarning, Self::EarthquakeReport];
+
+    pub const fn is_retired(self) -> bool {
+        matches!(self, Self::WeatherWarning | Self::Tsunami | Self::Typhoon)
+    }
 
     pub fn as_str(self) -> &'static str {
         match self {

@@ -612,17 +612,11 @@ components:
       oneOf:
         - $ref: "#/components/schemas/EarthquakeWarningRule"
         - $ref: "#/components/schemas/EarthquakeReportRule"
-        - $ref: "#/components/schemas/WeatherWarningRule"
-        - $ref: "#/components/schemas/TsunamiRule"
-        - $ref: "#/components/schemas/TyphoonRule"
       discriminator:
         propertyName: category
         mapping:
           earthquake_warning: "#/components/schemas/EarthquakeWarningRule"
           earthquake_report: "#/components/schemas/EarthquakeReportRule"
-          weather_warning: "#/components/schemas/WeatherWarningRule"
-          tsunami: "#/components/schemas/TsunamiRule"
-          typhoon: "#/components/schemas/TyphoonRule"
     EarthquakeWarningRule:
       type: object
       additionalProperties: false
@@ -672,54 +666,6 @@ components:
           minimum: 0
           maximum: 10
           description: 最低震级。地震速报只按震级匹配，不按震中距离或监测点预计烈度过滤。命中后 Bark 中断级别固定为 passive。
-    WeatherWarningRule:
-      type: object
-      additionalProperties: false
-      required: [category, sources, min_severity, fallback_radius_km]
-      properties:
-        category:
-          type: string
-          const: weather_warning
-        sources:
-          $ref: "#/components/schemas/SourceSelection"
-        min_severity:
-          type: integer
-          minimum: 1
-          maximum: 4
-        fallback_radius_km:
-          type: number
-          format: double
-          minimum: 1
-          maximum: 2000
-    TsunamiRule:
-      type: object
-      additionalProperties: false
-      required: [category, sources, min_severity]
-      properties:
-        category:
-          type: string
-          const: tsunami
-        sources:
-          $ref: "#/components/schemas/SourceSelection"
-        min_severity:
-          type: integer
-          minimum: 1
-          maximum: 4
-    TyphoonRule:
-      type: object
-      additionalProperties: false
-      required: [category, sources, max_center_distance_km]
-      properties:
-        category:
-          type: string
-          const: typhoon
-        sources:
-          $ref: "#/components/schemas/SourceSelection"
-        max_center_distance_km:
-          type: number
-          format: double
-          minimum: 1
-          maximum: 3000
     ErrorResponse:
       type: object
       additionalProperties: false
@@ -905,7 +851,7 @@ components:
           type: string
         category:
           type: string
-          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+          enum: [earthquake_warning, earthquake_report]
         source:
           type: string
         event_id:
@@ -1080,7 +1026,7 @@ components:
       properties:
         id:
           type: string
-          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+          enum: [earthquake_warning, earthquake_report]
         label:
           type: string
         source_groups:
@@ -1205,7 +1151,7 @@ components:
       properties:
         category:
           type: string
-          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+          enum: [earthquake_warning, earthquake_report]
         source:
           type: string
         event_id:
@@ -1289,7 +1235,7 @@ components:
           type: string
         category:
           type: string
-          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+          enum: [earthquake_warning, earthquake_report]
         updated_at_ms:
           type: integer
         latest_by_source:
@@ -1315,7 +1261,7 @@ components:
       properties:
         category:
           type: string
-          enum: [earthquake_warning, earthquake_report, weather_warning, tsunami, typhoon]
+          enum: [earthquake_warning, earthquake_report]
         source:
           type: string
         report_num:

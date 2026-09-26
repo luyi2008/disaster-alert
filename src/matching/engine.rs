@@ -93,6 +93,9 @@ fn match_compiled_with_context(
     context: &EventMatchContext<'_>,
 ) -> Option<DeliveryRow> {
     let event = context.event;
+    if event.category.is_retired() {
+        return None;
+    }
     let rule = subscription
         .rules
         .iter()
@@ -241,15 +244,7 @@ mod tests {
         DisasterEvent {
             category,
             channel: ProviderChannel::Wolfx,
-            source: match category {
-                DisasterCategory::WeatherWarning => "wolfx.weatheralarm",
-                DisasterCategory::Tsunami => "wolfx.tsunami",
-                DisasterCategory::Typhoon => "wolfx.typhoon",
-                DisasterCategory::EarthquakeWarning | DisasterCategory::EarthquakeReport => {
-                    "wolfx.cenc_eqlist"
-                }
-            }
-            .to_string(),
+            source: "wolfx.cenc_eew".to_string(),
             event_id: "event".to_string(),
             revision: "1".to_string(),
             report_num: 1,
@@ -309,37 +304,30 @@ mod tests {
     }
 
     #[test]
-    fn coordinate_less_tsunami_requires_an_administrative_match() {
-        let mut tsunami = event(DisasterCategory::Tsunami);
-        tsunami.latitude = None;
-        tsunami.longitude = None;
-        assert!(
-            match_compiled(
-                &subscription(DisasterCategory::Tsunami, Some("上海")),
-                &tsunami
-            )
-            .is_some()
-        );
-        assert!(
-            match_compiled(
-                &subscription(DisasterCategory::Tsunami, Some("北京")),
-                &tsunami
-            )
-            .is_none()
-        );
+    fn retired_categories_do_not_match() {
+        for category in [
+            DisasterCategory::WeatherWarning,
+            DisasterCategory::Tsunami,
+            DisasterCategory::Typhoon,
+        ] {
+            assert!(
+                match_compiled(&subscription(category, Some("上海")), &event(category)).is_none()
+            );
+        }
     }
 
     #[test]
-    fn earthquakes_and_typhoons_require_coordinates() {
-        for category in [
-            DisasterCategory::EarthquakeReport,
-            DisasterCategory::Typhoon,
-        ] {
-            let mut value = event(category);
-            value.latitude = None;
-            value.longitude = None;
-            assert!(match_compiled(&subscription(category, None), &value).is_none());
-        }
+    fn earthquake_reports_require_coordinates() {
+        let mut value = event(DisasterCategory::EarthquakeReport);
+        value.latitude = None;
+        value.longitude = None;
+        assert!(
+            match_compiled(
+                &subscription(DisasterCategory::EarthquakeReport, None),
+                &value
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -349,11 +337,12 @@ mod tests {
         ids.insert(17);
         let engine = MatchEngine::new(1)?;
         let rows = engine.match_blocks(
-            Arc::new(event(DisasterCategory::WeatherWarning)),
+            Arc::new(event(DisasterCategory::EarthquakeWarning)),
             vec![PostingBlock { id_block: 5, ids }],
             &HashMap::from([(expected, {
-                let mut value = subscription(DisasterCategory::WeatherWarning, Some("上海"));
+                let mut value = subscription(DisasterCategory::EarthquakeWarning, Some("上海"));
                 value.subscription_id = expected;
+                value.rules[0].distance_km = 20_000.0;
                 value
             })]),
         );

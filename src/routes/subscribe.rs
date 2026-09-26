@@ -635,13 +635,13 @@ mod tests {
                 region: crate::models::AdministrativeRegion::default(),
             }],
             alerts: vec![crate::models::AlertRule::default_for(
-                crate::models::DisasterCategory::WeatherWarning,
+                crate::models::DisasterCategory::EarthquakeReport,
             )],
         }
     }
 
     #[test]
-    fn weather_only_subscription_does_not_require_intensity_bands() {
+    fn earthquake_report_subscription_does_not_require_intensity_bands() {
         let payload = request();
         let subscription = Subscription::new(payload.destination, payload.targets, payload.alerts);
         assert!(subscription.validate().is_ok());

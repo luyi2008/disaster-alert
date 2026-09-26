@@ -113,7 +113,7 @@ mod tests {
         DisasterEvent {
             category,
             channel: ProviderChannel::Wolfx,
-            source: "wolfx.typhoon".to_string(),
+            source: "wolfx.cenc_eew".to_string(),
             event_id: "event".to_string(),
             revision: "1".to_string(),
             report_num: 1,
@@ -134,25 +134,19 @@ mod tests {
     }
 
     #[test]
-    fn broad_typhoon_plan_uses_coarse_cells_without_a_truncating_ring_cap() -> Result<()> {
-        let plan = MatchPlan::for_event(&event(DisasterCategory::Typhoon))?;
-        let cells = plan.scopes.iter().find_map(|scope| match scope {
-            MatchScope::Cells {
-                resolution_index,
-                cells,
-            } => Some((*resolution_index, cells.len())),
-            MatchScope::Regions(_) | MatchScope::Broad => None,
-        });
-        let (resolution, count) = cells.context("missing cell scope")?;
-        anyhow::ensure!(resolution == 0);
-        anyhow::ensure!(count > 1_000);
-        Ok(())
-    }
-
-    #[test]
-    fn tsunami_without_regions_does_not_use_coordinate_candidates() -> Result<()> {
-        let plan = MatchPlan::for_event(&event(DisasterCategory::Tsunami))?;
-        anyhow::ensure!(matches!(plan.scopes.as_slice(), [MatchScope::Broad]));
+    fn earthquake_warning_plan_is_a_broad_scan() -> Result<()> {
+        let plan = MatchPlan::for_event(&event(DisasterCategory::EarthquakeWarning))?;
+        anyhow::ensure!(
+            plan.scopes
+                .iter()
+                .any(|scope| matches!(scope, MatchScope::Broad))
+        );
+        anyhow::ensure!(
+            !plan
+                .scopes
+                .iter()
+                .any(|scope| matches!(scope, MatchScope::Cells { .. }))
+        );
         Ok(())
     }
 }

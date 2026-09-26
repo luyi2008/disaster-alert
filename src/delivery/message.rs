@@ -33,9 +33,13 @@ pub(crate) fn format_disaster_alert(
         DisasterCategory::EarthquakeReport => {
             format_earthquake(event, target, timing, now_ms, false)
         }
-        DisasterCategory::WeatherWarning => format_weather(event, target),
-        DisasterCategory::Tsunami => format_tsunami(event, target),
-        DisasterCategory::Typhoon => format_typhoon(event, target),
+        DisasterCategory::WeatherWarning
+        | DisasterCategory::Tsunami
+        | DisasterCategory::Typhoon => DisasterAlertContent {
+            title: String::new(),
+            subtitle: String::new(),
+            body: String::new(),
+        },
     }
 }
 
@@ -108,100 +112,6 @@ fn format_earthquake(
     append_regions(event, "可能影响", &mut lines);
     append_time(event, "发生时间", &mut lines);
     lines.push("安全提示：请保持冷静，远离玻璃、悬挂物和不稳固家具。".to_string());
-
-    DisasterAlertContent {
-        title,
-        subtitle: subtitle.join(" · "),
-        body: lines.join("\n"),
-    }
-}
-
-fn format_weather(event: &DisasterEvent, target: &MonitoringTarget) -> DisasterAlertContent {
-    let title = stateful_title("气象预警", event, None, 0);
-    let target_name = target_name(target);
-    let event_title = clean_inline(&event.title);
-    let mut subtitle = vec![
-        event_title
-            .is_empty()
-            .then_some("气象部门发布预警".to_string())
-            .unwrap_or(event_title),
-    ];
-    subtitle.push(format!("监测点 {target_name}"));
-    append_report_state(event, &mut subtitle);
-
-    let mut lines = vec![format!("监测地点：{target_name}")];
-    append_regions(event, "预警区域", &mut lines);
-    append_description(event, "预警内容", &mut lines);
-    append_time(event, "发布时间", &mut lines);
-    lines.push("防范提示：请关注临近预报，合理调整出行和户外活动。".to_string());
-
-    DisasterAlertContent {
-        title,
-        subtitle: subtitle.join(" · "),
-        body: lines.join("\n"),
-    }
-}
-
-fn format_tsunami(event: &DisasterEvent, target: &MonitoringTarget) -> DisasterAlertContent {
-    let title = stateful_title("海啸预警", event, None, 0);
-    let target_name = target_name(target);
-    let event_title = clean_inline(&event.title);
-    let mut subtitle = vec![
-        event_title
-            .is_empty()
-            .then_some("海啸风险信息".to_string())
-            .unwrap_or(event_title),
-    ];
-    subtitle.push(format!("监测点 {target_name}"));
-    append_report_state(event, &mut subtitle);
-
-    let mut lines = vec![format!("监测地点：{target_name}")];
-    append_regions(event, "影响区域", &mut lines);
-    append_description(event, "预警说明", &mut lines);
-    let mut earthquake = Vec::new();
-    if let Some(magnitude) = event.magnitude {
-        earthquake.push(format!("震级 M{magnitude:.1}"));
-    }
-    if let Some(depth_km) = event.depth_km {
-        earthquake.push(format!("深度 {depth_km:.0} km"));
-    }
-    if !earthquake.is_empty() {
-        lines.push(format!("相关地震：{}", earthquake.join(" · ")));
-    }
-    append_time(event, "更新时间", &mut lines);
-    lines.push("避险提示：沿海及河口区域人员请远离岸线，按官方指引向高处转移。".to_string());
-
-    DisasterAlertContent {
-        title,
-        subtitle: subtitle.join(" · "),
-        body: lines.join("\n"),
-    }
-}
-
-fn format_typhoon(event: &DisasterEvent, target: &MonitoringTarget) -> DisasterAlertContent {
-    let title = stateful_title("台风动态", event, None, 0);
-    let target_name = target_name(target);
-    let event_title = clean_inline(&event.title);
-    let mut subtitle = vec![
-        event_title
-            .is_empty()
-            .then_some("台风最新动态".to_string())
-            .unwrap_or(event_title),
-    ];
-    subtitle.push(format!("监测点 {target_name}"));
-    append_report_state(event, &mut subtitle);
-
-    let mut lines = vec![format!("监测地点：{target_name}")];
-    if let Some((latitude, longitude)) = event.latitude.zip(event.longitude) {
-        lines.push(format!("台风中心：{latitude:.2}°, {longitude:.2}°"));
-    }
-    if let Some(radius_km) = event.radius_km {
-        lines.push(format!("七级风圈：约 {radius_km:.0} km"));
-    }
-    append_regions(event, "可能影响", &mut lines);
-    append_description(event, "强度信息", &mut lines);
-    append_time(event, "更新时间", &mut lines);
-    lines.push("防范提示：请加固门窗和室外物品，避免前往沿海、山区及低洼地带。".to_string());
 
     DisasterAlertContent {
         title,
@@ -295,13 +205,6 @@ fn append_regions(event: &DisasterEvent, label: &str, lines: &mut Vec<String>) {
     }
 }
 
-fn append_description(event: &DisasterEvent, label: &str, lines: &mut Vec<String>) {
-    let description = clean_inline(&event.description);
-    if !description.is_empty() && description != clean_inline(&event.title) {
-        lines.push(format!("{label}：{description}"));
-    }
-}
-
 fn append_time(event: &DisasterEvent, label: &str, lines: &mut Vec<String>) {
     let occurred_at = clean_inline(&event.occurred_at);
     if !occurred_at.is_empty() {
@@ -344,9 +247,9 @@ mod tests {
             title: match category {
                 DisasterCategory::EarthquakeWarning => "地震预警 四川泸定".to_string(),
                 DisasterCategory::EarthquakeReport => "地震信息 四川泸定".to_string(),
-                DisasterCategory::WeatherWarning => "上海市雷电黄色预警".to_string(),
-                DisasterCategory::Tsunami => "海啸黄色警报".to_string(),
-                DisasterCategory::Typhoon => "台风 海棠".to_string(),
+                DisasterCategory::WeatherWarning
+                | DisasterCategory::Tsunami
+                | DisasterCategory::Typhoon => String::new(),
             },
             description: "预计未来六小时有明显影响".to_string(),
             latitude: Some(29.6),
@@ -404,17 +307,15 @@ mod tests {
     }
 
     #[test]
-    fn non_earthquake_categories_have_distinct_user_facing_layouts() {
-        let cases = [
-            (DisasterCategory::WeatherWarning, "气象预警", "预警内容"),
-            (DisasterCategory::Tsunami, "海啸预警", "避险提示"),
-            (DisasterCategory::Typhoon, "台风动态", "七级风圈"),
-        ];
-        for (category, title, body_fragment) in cases {
+    fn retired_categories_produce_no_bark_copy() {
+        for category in [
+            DisasterCategory::WeatherWarning,
+            DisasterCategory::Tsunami,
+            DisasterCategory::Typhoon,
+        ] {
             let content = format_disaster_alert(&event(category), &target(), None, 0);
-            assert_eq!(content.title, title);
-            assert!(content.body.contains(body_fragment));
-            assert_no_internal_fields(&content);
+            let rendered = format!("{}\n{}\n{}", content.title, content.subtitle, content.body);
+            assert!(rendered.trim().is_empty(), "{rendered}");
         }
     }
 

@@ -17,7 +17,7 @@ pub(crate) fn match_subscription(
     let rule = subscription
         .alerts
         .iter()
-        .find(|rule| rule.category() == event.category)?;
+        .find(|rule| rule.category() == event.category && !rule.category().is_retired())?;
     if !source_matches(rule.sources(), &event.source) || !threshold_matches(rule, event) {
         return None;
     }

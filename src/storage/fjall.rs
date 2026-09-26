@@ -2563,6 +2563,38 @@ mod tests {
     }
 
     #[test]
+    fn reading_a_stored_subscription_drops_retired_alert_rules() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let storage = FjallStorage::open(directory.path())?;
+        let mut retired = subscription();
+        retired.alerts.extend([
+            AlertRule::default_for(DisasterCategory::WeatherWarning),
+            AlertRule::default_for(DisasterCategory::Tsunami),
+            AlertRule::default_for(DisasterCategory::Typhoon),
+        ]);
+        let id = SubscriptionId(7);
+        let record = StoredSubscription {
+            id,
+            destination_id: DestinationNumericId(3),
+            generation: 1,
+            active: true,
+            subscription: retired,
+        };
+        storage
+            .subscriptions
+            .insert(id.0.to_be_bytes(), encode(&record)?)?;
+        let loaded = storage
+            .stored_subscription(id)?
+            .context("retired subscription should stay readable")?;
+        anyhow::ensure!(loaded.subscription.alerts.len() == 1);
+        anyhow::ensure!(
+            loaded.subscription.alerts[0].category() == DisasterCategory::EarthquakeReport
+        );
+        anyhow::ensure!(storage.active_subscription_count()? == 1);
+        Ok(())
+    }
+
+    #[test]
     fn bitmap_matcher_agrees_with_reference_matcher_for_generated_cases() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = FjallStorage::open(directory.path())?;

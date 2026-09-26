@@ -1,13 +1,13 @@
 # 灾害预警 Bark 订阅系统
 
-通过 Bark 接收地震、气象、海啸和台风信息。服务提供 HTTP JSON API。网页订阅界面在独立仓库 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)，可单独部署。
+通过 Bark 接收地震预警和地震速报。服务提供 HTTP JSON API。网页订阅界面在独立仓库 [disaster-alert-web](https://github.com/luyi2008/disaster-alert-web)，可单独部署。
 
 ## 功能
 
 - 接收 Wolfx 提供的灾害信息；Huania 地震预警默认关闭，需设置 `HUANIA_ENABLED=true` 后重启才接入
-- 支持地震预警、地震速报、气象预警、海啸预警和台风信息
+- 支持地震预警和地震速报
 - 每个 Bark 订阅可以配置最多 3 个监测地点
-- 可按灾种、信息来源、预计烈度、震级、严重度和距离设置通知条件
+- 可按信息来源、预计烈度和最低震级设置通知条件
 - 地震速报只按最低震级匹配，不按震中距离或监测点预计烈度过滤，远处的正式测定也会送达；Bark 中断级别固定为 `passive`
 - 地震预警按监测点预计烈度匹配：震级够大但本地烈度不足时不会通知
 - 地震通知显示监测点预计烈度、距离以及 P 波和 S 波到达时间
@@ -233,7 +233,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `UPDATE_MIN_REPORT_GAP` | `1` | 后续报告至少间隔多少个报告编号才再次推送 |
 | `IGNORE_TRAINING` | `true` | 是否忽略演练信息 |
 | `IGNORE_CANCEL` | `false` | 是否忽略取消或解除信息，通常应保持 `false` |
-| `STALE_ORIGIN_SECONDS` | `600` | 忽略起震时间超过该秒数的地震预警和气象预警。地震速报正式测定常在发震 8–20 分钟后到达，因此速报至少保留 3600 秒 |
+| `STALE_ORIGIN_SECONDS` | `600` | 忽略起震时间超过该秒数的地震预警。地震速报正式测定常在发震 8–20 分钟后到达，因此速报至少保留 3600 秒 |
 | `P_WAVE_KM_S` | `6.0` | P 波估算速度，单位 km/s |
 | `S_WAVE_KM_S` | `3.5` | S 波估算速度，单位 km/s |
 
