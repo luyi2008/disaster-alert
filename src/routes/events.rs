@@ -278,8 +278,8 @@ mod tests {
     ) -> DisasterEvent {
         DisasterEvent {
             category: DisasterCategory::EarthquakeReport,
-            channel: ProviderChannel::FanStudio,
-            source: "fanstudio.cenc".to_string(),
+            channel: ProviderChannel::Wolfx,
+            source: "wolfx.cenc_eqlist".to_string(),
             event_id: event_id.to_string(),
             revision: "1".to_string(),
             report_num: 1,
@@ -357,7 +357,7 @@ mod tests {
             .context("missing events")?;
         anyhow::ensure!(events.len() == 2);
         anyhow::ensure!(events[0]["latest"][0]["title"] == "newer");
-        anyhow::ensure!(events[0]["latest"][0]["source"] == "fanstudio.cenc");
+        anyhow::ensure!(events[0]["latest"][0]["source"] == "wolfx.cenc_eqlist");
         anyhow::ensure!(events[0]["latest"][0]["latitude"] == 25.0);
         anyhow::ensure!(events[0]["latest"][0]["longitude"] == 80.0);
         anyhow::ensure!(events[0]["latest"][0]["description"] == "newer description");

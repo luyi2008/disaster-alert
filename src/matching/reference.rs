@@ -249,8 +249,8 @@ mod tests {
     fn distant_xinjiang(category: DisasterCategory) -> DisasterEvent {
         DisasterEvent {
             category,
-            channel: crate::models::ProviderChannel::FanStudio,
-            source: "fanstudio.cenc".to_string(),
+            channel: crate::models::ProviderChannel::Wolfx,
+            source: "wolfx.cenc_eqlist".to_string(),
             event_id: "xinjiang-1".to_string(),
             revision: "1".to_string(),
             report_num: 1,

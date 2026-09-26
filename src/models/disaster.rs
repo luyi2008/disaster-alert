@@ -259,7 +259,6 @@ use std::fmt;
 #[serde(rename_all = "snake_case")]
 pub enum ProviderChannel {
     Wolfx,
-    FanStudio,
     Huania,
 }
 
@@ -267,7 +266,6 @@ impl ProviderChannel {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Wolfx => "wolfx",
-            Self::FanStudio => "fanstudio",
             Self::Huania => "huania",
         }
     }
@@ -286,7 +284,7 @@ mod tests {
     fn event(category: DisasterCategory, source: &str, event_id: &str) -> DisasterEvent {
         DisasterEvent {
             category,
-            channel: ProviderChannel::FanStudio,
+            channel: ProviderChannel::Wolfx,
             source: source.to_string(),
             event_id: event_id.to_string(),
             revision: "1".to_string(),
@@ -357,19 +355,6 @@ mod tests {
     }
 
     #[test]
-    fn interprets_fanstudio_jma_time_as_jst() {
-        let fanstudio = event(
-            DisasterCategory::EarthquakeWarning,
-            "fanstudio.jma",
-            "fan-1",
-        );
-        let mut wolfx = fanstudio.clone();
-        wolfx.channel = ProviderChannel::Wolfx;
-        wolfx.source = "wolfx.jma_eew".to_string();
-        assert_eq!(parse_event_epoch(&wolfx), parse_event_epoch(&fanstudio));
-    }
-
-    #[test]
     fn interprets_all_wolfx_china_naive_times_as_utc_plus_eight() {
         let mut utc = event(
             DisasterCategory::EarthquakeWarning,
@@ -392,24 +377,11 @@ mod tests {
     }
 
     #[test]
-    fn interprets_fanstudio_weather_alarm_naive_time_as_utc_plus_eight() {
-        let weather = event(
-            DisasterCategory::WeatherWarning,
-            "fanstudio.weatheralarm",
-            "weather-1",
-        );
-        let mut utc = weather.clone();
-        utc.source = "future.explicit-timezone".to_string();
-        utc.occurred_at = "2026-07-10T04:34:56Z".to_string();
-        assert_eq!(parse_event_epoch(&weather), parse_event_epoch(&utc));
-    }
-
-    #[test]
     fn rejects_ambiguous_leap_second_values() {
         let mut value = event(
             DisasterCategory::EarthquakeWarning,
-            "fanstudio.jma",
-            "fan-1",
+            "wolfx.jma_eew",
+            "jma-1",
         );
         value.occurred_at = "2026-07-10 23:59:60".to_string();
         assert_eq!(parse_event_epoch(&value), None);
@@ -419,8 +391,8 @@ mod tests {
     fn rejects_malformed_fractional_seconds() {
         let mut value = event(
             DisasterCategory::EarthquakeWarning,
-            "fanstudio.jma",
-            "fan-1",
+            "wolfx.jma_eew",
+            "jma-1",
         );
         value.occurred_at = "2026-07-10 12:34:56.".to_string();
         assert_eq!(parse_event_epoch(&value), None);
@@ -441,7 +413,7 @@ mod tests {
     fn global_or_unknown_sources_require_an_explicit_timezone() {
         let mut value = event(
             DisasterCategory::EarthquakeReport,
-            "fanstudio.usgs",
+            "future.global-source",
             "usgs-1",
         );
         assert_eq!(parse_event_epoch(&value), None);

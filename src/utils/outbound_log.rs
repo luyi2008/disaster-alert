@@ -380,9 +380,7 @@ mod tests {
             .parse()
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let redacted = redact_http_uri(&uri);
-        anyhow::ensure!(
-            redacted.contains("/api/incidents/evt-1/notifications/abc***ken")
-        );
+        anyhow::ensure!(redacted.contains("/api/incidents/evt-1/notifications/abc***ken"));
         anyhow::ensure!(!redacted.contains("abcdefg.signaturetoken"));
         Ok(())
     }

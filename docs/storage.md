@@ -8,7 +8,7 @@
 
 数据源推来的每一版报文是 **event**（`DisasterEvent`）。现实里的一场灾害是 **incident**（`IncidentRecord`）。
 
-一次新疆地震，FAN Studio 报一条、Wolfx 再报一条，是两份 event 形态的数据，合成 **一个** incident。匹配引擎和 Bark 正文读的是某一版 event 快照；管理接口和详情页时间线读的是 incident 档案。
+一次新疆地震，Wolfx 的四川台网、中国地震台网各报一条，是两份 event 形态的数据，合成 **一个** incident。匹配引擎和 Bark 正文读的是某一版 event 快照；管理接口和详情页时间线读的是 incident 档案。
 
 | | event | incident |
 | --- | --- | --- |
@@ -20,7 +20,7 @@
 
 同一来源、同一个 `event_id` 复用同一个 incident。不同来源但时间、地点、震级接近（约 120 秒、100 km、震级差 1）也会并入同一 incident。
 
-地震预警和地震速报走同一套 keyspace，用记录上的 `category` 区分。没有单独的「全国地震目录」表：Wolfx `cenc_eqlist` 每次只取最新一条，FAN Studio 也是当前最新快照。
+地震预警和地震速报走同一套 keyspace，用记录上的 `category` 区分。没有单独的「全国地震目录」表：Wolfx `cenc_eqlist` 每次只取最新一条。
 
 ## 数据流
 
@@ -110,7 +110,7 @@ flowchart LR
 
 成功推到 Bark 的，另外写入 `ledger`（投递记录）和 `contexts`（详情快照）。
 
-目录完整度受上游限制：Wolfx `cenc_eqlist` 只取当前最新一条，FAN Studio CENC 也是当前快照，不是列表回放。停机期间或同时发生、未出现在「最新一条」里的地震不会仅因保留策略而出现。产品决策见 [prd/earthquake-report-catalog.md](prd/earthquake-report-catalog.md)。
+目录完整度受上游限制：Wolfx `cenc_eqlist` 只取当前最新一条，不是列表回放。停机期间或同时发生、未出现在「最新一条」里的地震不会仅因保留策略而出现。产品决策见 [prd/earthquake-report-catalog.md](prd/earthquake-report-catalog.md)。
 
 `POST /api/simulate` 不走这条流水线，不会写入 `inbox` / `incidents` / `match_jobs` / `ledger`。旁路边界见 [simulate.md](simulate.md)。
 

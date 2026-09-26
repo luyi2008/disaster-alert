@@ -1,7 +1,7 @@
 use crate::config::{Config, load_dotenv};
 use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
 use crate::lifecycle;
-use crate::providers::{FanStudioSource, HuaniaSource, WolfxSource};
+use crate::providers::{HuaniaSource, WolfxSource};
 use crate::routes::{
     AppState, ReverseGeocoder, admin_deliveries_handler, admin_device_keys_handler,
     admin_subscriptions_handler, bark_urls_handler, deliveries_handler, events_handler,
@@ -204,7 +204,6 @@ async fn run() -> Result<()> {
         .await
         .context("failed to bind HTTP listener")?;
     let wolfx = WolfxSource::new(&config, event_runtime.clone(), runtime_status.clone());
-    let fanstudio = FanStudioSource::new(&config, event_runtime.clone(), runtime_status.clone());
     let huania = if config.huania_enabled {
         tracing::info!(event = "huania.enabled", "huania.enabled");
         Some(HuaniaSource::new(
@@ -224,7 +223,6 @@ async fn run() -> Result<()> {
             event_runtime,
             subscription_confirmations,
             wolfx,
-            fanstudio,
             huania,
         ),
         Duration::from_secs(config.shutdown_timeout_seconds),

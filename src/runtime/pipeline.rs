@@ -234,16 +234,6 @@ impl EventRuntime {
             .await
     }
 
-    pub(crate) async fn submit_provider_batch(
-        &self,
-        provider: ProviderChannel,
-        events: Vec<DisasterEvent>,
-        cursor: ProviderCursor,
-    ) -> bool {
-        self.submit_provider_batch_inner(provider, events, Some(cursor))
-            .await
-    }
-
     pub(crate) async fn submit_provider_snapshot_batch(
         &self,
         provider: ProviderChannel,
@@ -1563,10 +1553,10 @@ mod tests {
         invalid.event_id.clear();
 
         let accepted = runtime
-            .submit_provider_batch(
-                ProviderChannel::FanStudio,
+            .submit_provider_snapshot_batch(
+                ProviderChannel::Wolfx,
                 vec![valid, invalid],
-                ProviderCursor::new("cenc", "cursor-1")?,
+                Some(ProviderCursor::new("cenc", "cursor-1")?),
             )
             .await;
 
@@ -1574,7 +1564,7 @@ mod tests {
         anyhow::ensure!(storage.inner().pending_inbox(1)?.is_empty());
         anyhow::ensure!(
             runtime
-                .provider_cursors(ProviderChannel::FanStudio, vec!["cenc".to_string()])
+                .provider_cursors(ProviderChannel::Wolfx, vec!["cenc".to_string()])
                 .await?
                 .is_empty()
         );
@@ -1819,8 +1809,8 @@ mod tests {
     fn test_delivery_event(report_num: u32, title: &str) -> DisasterEvent {
         DisasterEvent {
             category: DisasterCategory::EarthquakeReport,
-            channel: ProviderChannel::FanStudio,
-            source: "fanstudio.cenc".to_string(),
+            channel: ProviderChannel::Wolfx,
+            source: "wolfx.cenc_eqlist".to_string(),
             event_id: "delivery-engine-order".to_string(),
             revision: report_num.to_string(),
             report_num,
