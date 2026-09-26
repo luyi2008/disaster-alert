@@ -260,6 +260,8 @@ use std::fmt;
 pub enum ProviderChannel {
     Wolfx,
     Huania,
+    /// FAN Studio is no longer ingested. Existing Fjall records still store this tag.
+    FanStudio,
 }
 
 impl ProviderChannel {
@@ -267,6 +269,7 @@ impl ProviderChannel {
         match self {
             Self::Wolfx => "wolfx",
             Self::Huania => "huania",
+            Self::FanStudio => "fanstudio",
         }
     }
 }

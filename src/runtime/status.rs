@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub(crate) struct RuntimeStatus {
     wolfx: Arc<ChannelMetrics>,
     huania: Arc<ChannelMetrics>,
+    /// In-flight records may still name the removed FAN Studio provider.
+    retired_fan_studio: Arc<ChannelMetrics>,
     inbox_ready: Arc<ReadyQueueMetrics>,
     match_ready: Arc<ReadyQueueMetrics>,
     delivery_ready: Arc<ReadyQueueMetrics>,
@@ -79,6 +81,7 @@ impl RuntimeStatus {
         match channel {
             ProviderChannel::Wolfx => &self.wolfx,
             ProviderChannel::Huania => &self.huania,
+            ProviderChannel::FanStudio => &self.retired_fan_studio,
         }
     }
 

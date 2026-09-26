@@ -2156,6 +2156,7 @@ fn cursor_key(provider: ProviderChannel, stream: &str) -> Vec<u8> {
     key.extend_from_slice(b"cursor:");
     key.push(match provider {
         ProviderChannel::Wolfx => 1,
+        ProviderChannel::FanStudio => 2,
         ProviderChannel::Huania => 3,
     });
     key.push(b':');
@@ -3223,6 +3224,95 @@ mod tests {
 
     fn test_success(row: DeliveryRow) -> DeliverySuccess {
         DeliverySuccess { row_index: 0, row }
+    }
+
+    #[test]
+    fn prune_decodes_records_from_the_retired_fan_studio_channel() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let (incident_id, event_revision) = {
+            let storage = FjallStorage::open(directory.path())?;
+            storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![correlated_event()], None)?;
+            let job = EventCoordinator::new(storage.clone())
+                .process_next()?
+                .context("missing match job")?;
+            storage.persist()?;
+            (job.incident_id, job.event_revision)
+        };
+        rewrite_stored_channels(directory.path(), "wolfx", "fan_studio")?;
+
+        let storage = FjallStorage::open(directory.path())?;
+        storage.prune(0, 0, 0)?;
+        let event = storage
+            .event(event_revision)?
+            .context("retired event should stay readable")?;
+        anyhow::ensure!(event.channel.as_str() == "fanstudio");
+        anyhow::ensure!(channel_text(&event.channel)? == "fan_studio");
+        let incident = storage
+            .incident(&incident_id)?
+            .context("retired incident should stay readable")?;
+        let stored = incident
+            .latest_by_source
+            .first()
+            .context("retired incident is missing its event")?;
+        anyhow::ensure!(stored.channel.as_str() == "fanstudio");
+        anyhow::ensure!(channel_text(&stored.channel)? == "fan_studio");
+        Ok(())
+    }
+
+    fn rewrite_stored_channels(path: &std::path::Path, from: &str, to: &str) -> Result<()> {
+        let db = Database::builder(path)
+            .open()
+            .context("failed to reopen database for channel rewrite")?;
+        for name in ["events", "incidents", "inbox", "rejected_inbox"] {
+            let keyspace = db
+                .keyspace(name, KeyspaceCreateOptions::default)
+                .with_context(|| format!("failed to open {name} for channel rewrite"))?;
+            let mut updates = Vec::new();
+            for item in keyspace.iter() {
+                let (key, value) = item.into_inner()?;
+                let mut decoded: ciborium::Value =
+                    ciborium::from_reader(value.as_ref()).context("stored record is not CBOR")?;
+                replace_channel_text(&mut decoded, from, to);
+                let mut encoded = Vec::new();
+                ciborium::into_writer(&decoded, &mut encoded)
+                    .context("failed to re-encode stored record")?;
+                updates.push((key.to_vec(), encoded));
+            }
+            for (key, value) in updates {
+                keyspace.insert(key, value)?;
+            }
+        }
+        db.persist(PersistMode::SyncAll)
+            .context("failed to persist rewritten channels")
+    }
+
+    fn replace_channel_text(value: &mut ciborium::Value, from: &str, to: &str) {
+        match value {
+            ciborium::Value::Map(entries) => {
+                for (key, child) in entries {
+                    let is_channel =
+                        matches!(key, ciborium::Value::Text(name) if name == "channel");
+                    if is_channel && matches!(child, ciborium::Value::Text(text) if text == from) {
+                        *child = ciborium::Value::Text(to.to_string());
+                    } else {
+                        replace_channel_text(child, from, to);
+                    }
+                }
+            }
+            ciborium::Value::Array(items) => {
+                for item in items {
+                    replace_channel_text(item, from, to);
+                }
+            }
+            ciborium::Value::Tag(_, inner) => replace_channel_text(inner, from, to),
+            _ => {}
+        }
+    }
+
+    fn channel_text(channel: &ProviderChannel) -> Result<String> {
+        let mut encoded = Vec::new();
+        ciborium::into_writer(channel, &mut encoded).context("failed to encode channel")?;
+        ciborium::from_reader(encoded.as_slice()).context("channel encoding is not text")
     }
 
     fn correlated_event() -> DisasterEvent {
