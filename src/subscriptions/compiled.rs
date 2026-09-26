@@ -36,7 +36,19 @@ pub(crate) struct CompiledSubscription {
     pub(crate) destination_id: DestinationNumericId,
     pub(crate) generation: u64,
     pub(crate) targets: Vec<CompiledTarget>,
+    #[serde(deserialize_with = "deserialize_compiled_rules")]
     pub(crate) rules: Vec<CompiledRule>,
+}
+
+fn deserialize_compiled_rules<'de, D>(deserializer: D) -> Result<Vec<CompiledRule>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let rules = Vec::<CompiledRule>::deserialize(deserializer)?;
+    Ok(rules
+        .into_iter()
+        .filter(|rule| !rule.category.is_retired())
+        .collect())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,6 +343,43 @@ fn compile_rule(rule: &AlertRule) -> Result<CompiledRule> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reading_compiled_rules_drops_retired_categories() {
+        let compiled = CompiledSubscription {
+            subscription_id: SubscriptionId(1),
+            destination_id: DestinationNumericId(1),
+            generation: 1,
+            targets: Vec::new(),
+            rules: vec![
+                sample_rule(DisasterCategory::EarthquakeWarning),
+                sample_rule(DisasterCategory::WeatherWarning),
+                sample_rule(DisasterCategory::Tsunami),
+                sample_rule(DisasterCategory::Typhoon),
+            ],
+        };
+        let encoded =
+            serde_json::to_vec(&compiled).expect("compiled subscription should serialize");
+        let decoded: CompiledSubscription =
+            serde_json::from_slice(&encoded).expect("compiled subscription should decode");
+        assert_eq!(decoded.rules.len(), 1);
+        assert_eq!(
+            decoded.rules[0].category,
+            DisasterCategory::EarthquakeWarning
+        );
+    }
+
+    fn sample_rule(category: DisasterCategory) -> CompiledRule {
+        CompiledRule {
+            category,
+            source_mask: 0,
+            wildcard_source: true,
+            min_magnitude: 0.0,
+            min_severity: 0,
+            distance_km: 20_000.0,
+            intensity_bands: Vec::new(),
+        }
+    }
 
     #[test]
     fn source_ids_are_registry_ordinals_with_a_reserved_unknown_value() {

@@ -10,9 +10,23 @@ const MAX_TARGET_FIELD_CHARS: usize = 80;
 pub struct Subscription {
     pub destination: NotificationDestination,
     pub targets: Vec<MonitoringTarget>,
+    /// Retired weather, tsunami, and typhoon rules are dropped on read so old
+    /// databases still open. New requests reject those categories in `validate`.
+    #[serde(deserialize_with = "deserialize_stored_alerts")]
     pub alerts: Vec<AlertRule>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+fn deserialize_stored_alerts<'de, D>(deserializer: D) -> Result<Vec<AlertRule>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let alerts = Vec::<AlertRule>::deserialize(deserializer)?;
+    Ok(alerts
+        .into_iter()
+        .filter(|alert| !alert.category().is_retired())
+        .collect())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -328,6 +342,9 @@ fn validate_target(target: &MonitoringTarget) -> Result<(), String> {
 }
 
 fn validate_alert(alert: &AlertRule) -> Result<(), String> {
+    if alert.category().is_retired() {
+        return Err(format!("不再支持{}", alert.category().label()));
+    }
     validate_sources(alert.category(), alert.sources())?;
     match alert {
         AlertRule::EarthquakeWarning {
@@ -517,20 +534,73 @@ mod tests {
 
     #[test]
     fn rejects_source_from_another_category() {
-        let subscription = subscription(vec![AlertRule::Tsunami {
+        let subscription = subscription(vec![AlertRule::EarthquakeReport {
             sources: SourceSelection::Include {
                 ids: vec!["wolfx.jma_eew".to_string()],
             },
-            min_severity: 2,
+            min_magnitude: 4.5,
         }]);
 
         assert!(subscription.validate().is_err());
     }
 
     #[test]
+    fn rejects_retired_categories_on_new_subscriptions() {
+        for category in [
+            DisasterCategory::WeatherWarning,
+            DisasterCategory::Tsunami,
+            DisasterCategory::Typhoon,
+        ] {
+            let subscription = subscription(vec![AlertRule::default_for(category)]);
+            let error = subscription.validate().expect_err("retired category");
+            assert!(error.contains("不再支持"), "{error}");
+        }
+    }
+
+    #[test]
+    fn reading_a_stored_subscription_drops_retired_alert_rules() {
+        let stored = subscription(vec![
+            AlertRule::default_for(DisasterCategory::EarthquakeWarning),
+            AlertRule::default_for(DisasterCategory::WeatherWarning),
+            AlertRule::default_for(DisasterCategory::Tsunami),
+            AlertRule::default_for(DisasterCategory::Typhoon),
+            AlertRule::default_for(DisasterCategory::EarthquakeReport),
+        ]);
+        let encoded = serde_json::to_value(&stored).expect("subscription should serialize");
+        let decoded: Subscription =
+            serde_json::from_value(encoded).expect("stored subscription should decode");
+
+        assert_eq!(
+            decoded
+                .alerts
+                .iter()
+                .map(AlertRule::category)
+                .collect::<Vec<_>>(),
+            vec![
+                DisasterCategory::EarthquakeWarning,
+                DisasterCategory::EarthquakeReport,
+            ]
+        );
+        assert!(decoded.validate().is_ok());
+    }
+
+    #[test]
+    fn reading_only_retired_rules_leaves_the_subscription_loadable() {
+        let stored = subscription(vec![
+            AlertRule::default_for(DisasterCategory::WeatherWarning),
+            AlertRule::default_for(DisasterCategory::Tsunami),
+        ]);
+        let encoded = serde_json::to_vec(&stored).expect("subscription should serialize");
+        let decoded: Subscription =
+            serde_json::from_slice(&encoded).expect("retired-only subscription should decode");
+
+        assert!(decoded.alerts.is_empty());
+    }
+
+    #[test]
     fn rejects_invalid_target_coordinates() {
         let mut subscription = subscription(vec![AlertRule::default_for(
-            DisasterCategory::WeatherWarning,
+            DisasterCategory::EarthquakeWarning,
         )]);
         subscription.targets[0].point.latitude = 91.0;
 
@@ -564,22 +634,6 @@ mod tests {
                     "category": "earthquake_report",
                     "sources": { "mode": "include", "ids": ["wolfx.cenc_eqlist"] },
                     "min_magnitude": 4.5
-                },
-                {
-                    "category": "weather_warning",
-                    "sources": { "mode": "all" },
-                    "min_severity": 2,
-                    "fallback_radius_km": 100
-                },
-                {
-                    "category": "tsunami",
-                    "sources": { "mode": "all" },
-                    "min_severity": 2
-                },
-                {
-                    "category": "typhoon",
-                    "sources": { "mode": "all" },
-                    "max_center_distance_km": 300
                 }
             ]
         }))?;
@@ -622,12 +676,12 @@ mod tests {
     #[test]
     fn rejects_duplicate_categories_and_empty_source_allowlists() {
         let duplicate = subscription(vec![
-            AlertRule::default_for(DisasterCategory::Tsunami),
-            AlertRule::default_for(DisasterCategory::Tsunami),
+            AlertRule::default_for(DisasterCategory::EarthquakeReport),
+            AlertRule::default_for(DisasterCategory::EarthquakeReport),
         ]);
-        let empty_sources = subscription(vec![AlertRule::Tsunami {
+        let empty_sources = subscription(vec![AlertRule::EarthquakeReport {
             sources: SourceSelection::Include { ids: Vec::new() },
-            min_severity: 2,
+            min_magnitude: 4.5,
         }]);
 
         assert!(duplicate.validate().is_err());
@@ -637,7 +691,7 @@ mod tests {
     #[test]
     fn rejects_noncanonical_destination_identity() {
         let mut trailing_slash = subscription(vec![AlertRule::default_for(
-            DisasterCategory::WeatherWarning,
+            DisasterCategory::EarthquakeReport,
         )]);
         trailing_slash.destination = NotificationDestination::Bark {
             base_url: "https://api.day.app/".to_string(),

@@ -48,6 +48,10 @@ impl EventCoordinator {
     }
 
     fn process(&self, item: InboxItem) -> Result<Option<MatchJob>> {
+        if item.event.category.is_retired() {
+            self.storage.complete_inbox(item.id)?;
+            return Ok(None);
+        }
         let _lock = self.storage.lock_incident_pipeline()?;
         let incident_id = match self.storage.resolve_incident(&item.event) {
             Ok(incident_id) => incident_id,
@@ -112,7 +116,8 @@ impl EventCoordinator {
         event: &crate::models::DisasterEvent,
         now_ms: i64,
     ) -> bool {
-        if event.training && self.policy.ignore_training
+        if event.category.is_retired()
+            || event.training && self.policy.ignore_training
             || event.cancel && self.policy.ignore_cancel
             || stale_origin(event, self.policy.stale_origin_seconds, now_ms)
         {
