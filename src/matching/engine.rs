@@ -240,13 +240,13 @@ mod tests {
     fn event(category: DisasterCategory) -> DisasterEvent {
         DisasterEvent {
             category,
-            channel: ProviderChannel::FanStudio,
+            channel: ProviderChannel::Wolfx,
             source: match category {
-                DisasterCategory::WeatherWarning => "fanstudio.weatheralarm",
-                DisasterCategory::Tsunami => "fanstudio.tsunami",
-                DisasterCategory::Typhoon => "fanstudio.typhoon",
+                DisasterCategory::WeatherWarning => "wolfx.weatheralarm",
+                DisasterCategory::Tsunami => "wolfx.tsunami",
+                DisasterCategory::Typhoon => "wolfx.typhoon",
                 DisasterCategory::EarthquakeWarning | DisasterCategory::EarthquakeReport => {
-                    "fanstudio.cenc"
+                    "wolfx.cenc_eqlist"
                 }
             }
             .to_string(),

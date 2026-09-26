@@ -821,8 +821,8 @@ mod tests {
         );
         let event = DisasterEvent {
             category: DisasterCategory::EarthquakeWarning,
-            channel: ProviderChannel::FanStudio,
-            source: "fanstudio.eew".to_string(),
+            channel: ProviderChannel::Wolfx,
+            source: "wolfx.eew".to_string(),
             event_id: "event".to_string(),
             revision: "1".to_string(),
             report_num: 1,

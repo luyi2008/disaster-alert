@@ -1,5 +1,3 @@
-mod fanstudio;
-mod fanstudio_protocol;
 mod huania;
 mod reconnect;
 mod value;
@@ -11,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 const MAX_PROVIDER_CURSOR_VALUE_BYTES: usize = 8 * 1024;
 
-pub(crate) use fanstudio::FanStudioSource;
 pub(crate) use huania::HuaniaSource;
 pub(crate) use wolfx::WolfxSource;
 

@@ -7,7 +7,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Clone, Default)]
 pub(crate) struct RuntimeStatus {
     wolfx: Arc<ChannelMetrics>,
-    fanstudio: Arc<ChannelMetrics>,
     huania: Arc<ChannelMetrics>,
     inbox_ready: Arc<ReadyQueueMetrics>,
     match_ready: Arc<ReadyQueueMetrics>,
@@ -28,7 +27,6 @@ pub(crate) struct ChannelMetrics {
 #[derive(Serialize)]
 pub(crate) struct RuntimeStatusSnapshot {
     pub(crate) wolfx: ChannelSnapshot,
-    pub(crate) fanstudio: ChannelSnapshot,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) huania: Option<ChannelSnapshot>,
     pub(crate) durable: DurableBacklogSnapshot,
@@ -80,17 +78,12 @@ impl RuntimeStatus {
     pub(crate) fn channel(&self, channel: ProviderChannel) -> &ChannelMetrics {
         match channel {
             ProviderChannel::Wolfx => &self.wolfx,
-            ProviderChannel::FanStudio => &self.fanstudio,
             ProviderChannel::Huania => &self.huania,
         }
     }
 
     pub(crate) fn wolfx(&self) -> &ChannelMetrics {
         &self.wolfx
-    }
-
-    pub(crate) fn fanstudio(&self) -> &ChannelMetrics {
-        &self.fanstudio
     }
 
     pub(crate) fn huania(&self) -> &ChannelMetrics {
@@ -104,7 +97,6 @@ impl RuntimeStatus {
     ) -> RuntimeStatusSnapshot {
         RuntimeStatusSnapshot {
             wolfx: self.wolfx.snapshot(),
-            fanstudio: self.fanstudio.snapshot(),
             huania: huania_enabled.then(|| self.huania.snapshot()),
             durable,
             ready_queues: ReadyQueuesSnapshot {

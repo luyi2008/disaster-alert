@@ -519,7 +519,7 @@ mod tests {
     fn rejects_source_from_another_category() {
         let subscription = subscription(vec![AlertRule::Tsunami {
             sources: SourceSelection::Include {
-                ids: vec!["fanstudio.weatheralarm".to_string()],
+                ids: vec!["wolfx.jma_eew".to_string()],
             },
             min_severity: 2,
         }]);
@@ -562,7 +562,7 @@ mod tests {
                 },
                 {
                     "category": "earthquake_report",
-                    "sources": { "mode": "include", "ids": ["fanstudio.cenc"] },
+                    "sources": { "mode": "include", "ids": ["wolfx.cenc_eqlist"] },
                     "min_magnitude": 4.5
                 },
                 {

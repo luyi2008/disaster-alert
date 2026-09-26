@@ -2156,7 +2156,6 @@ fn cursor_key(provider: ProviderChannel, stream: &str) -> Vec<u8> {
     key.extend_from_slice(b"cursor:");
     key.push(match provider {
         ProviderChannel::Wolfx => 1,
-        ProviderChannel::FanStudio => 2,
         ProviderChannel::Huania => 3,
     });
     key.push(b':');
@@ -2567,9 +2566,17 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let storage = FjallStorage::open(directory.path())?;
         let mut random = TestRandom(0x5eed_f00d_cafe_babe);
+        let categories = DisasterCategory::ALL
+            .into_iter()
+            .filter(|category| {
+                crate::source_registry::SOURCES
+                    .iter()
+                    .any(|source| source.category == *category)
+            })
+            .collect::<Vec<_>>();
         let mut records = Vec::new();
         for index in 0..64 {
-            let category = DisasterCategory::ALL[random.index(DisasterCategory::ALL.len())];
+            let category = categories[random.index(categories.len())];
             records.push(storage.store_subscription(generated_subscription(
                 &mut random,
                 index,
@@ -2578,7 +2585,7 @@ mod tests {
         }
         let matcher = crate::matching::MatchEngine::new(4)?;
         for index in 0..40 {
-            let category = DisasterCategory::ALL[index % DisasterCategory::ALL.len()];
+            let category = categories[index % categories.len()];
             let event = generated_event(&mut random, index, category);
             let expected = records
                 .iter()
@@ -3123,11 +3130,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         {
             let storage = FjallStorage::open(directory.path())?;
-            storage.ingest_with_cursor(
-                ProviderChannel::FanStudio,
-                vec![correlated_event()],
-                None,
-            )?;
+            storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![correlated_event()], None)?;
             storage.persist()?;
         }
 
@@ -3225,8 +3228,8 @@ mod tests {
     fn correlated_event() -> DisasterEvent {
         DisasterEvent {
             category: DisasterCategory::EarthquakeReport,
-            channel: ProviderChannel::FanStudio,
-            source: "fanstudio.cenc".to_string(),
+            channel: ProviderChannel::Wolfx,
+            source: "wolfx.cenc_eqlist".to_string(),
             event_id: "retention-event".to_string(),
             revision: "1".to_string(),
             report_num: 1,
@@ -3250,7 +3253,7 @@ mod tests {
     fn unmatched_result_keeps_earthquake_report_incident_and_drops_event() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = FjallStorage::open(directory.path())?;
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![correlated_event()], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![correlated_event()], None)?;
         let job = EventCoordinator::new(storage.clone())
             .process_next()?
             .context("missing match job")?;
@@ -3278,8 +3281,8 @@ mod tests {
         let storage = FjallStorage::open(directory.path())?;
         let mut warning = correlated_event();
         warning.category = DisasterCategory::EarthquakeWarning;
-        warning.source = "fanstudio.cea".to_string();
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![warning], None)?;
+        warning.source = "wolfx.jma_eew".to_string();
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![warning], None)?;
         let job = EventCoordinator::new(storage.clone())
             .process_next()?
             .context("missing match job")?;
@@ -3301,7 +3304,7 @@ mod tests {
         let mut second = first.clone();
         second.report_num = 2;
         second.revision = "2".to_string();
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![first, second], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![first, second], None)?;
         let coordinator = EventCoordinator::new(storage.clone());
         let first_job = coordinator.process_next()?.context("missing first job")?;
         let second_job = coordinator.process_next()?.context("missing second job")?;
@@ -3327,7 +3330,7 @@ mod tests {
         let directory = tempfile::tempdir()?;
         let storage = FjallStorage::open(directory.path())?;
         let first = correlated_event();
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![first.clone()], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![first.clone()], None)?;
         let coordinator = EventCoordinator::new(storage.clone());
         let first_job = coordinator.process_next()?.context("missing first job")?;
         let batch = DeliveryBatch {
@@ -3349,7 +3352,7 @@ mod tests {
         let mut update = first;
         update.report_num = 2;
         update.revision = "2".to_string();
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![update], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![update], None)?;
         let second_job = coordinator.process_next()?.context("missing second job")?;
         storage.commit_match_batches(second_job.id, &[])?;
 
@@ -3372,7 +3375,7 @@ mod tests {
         first.occurred_at = "2026-01-01T00:00:00Z".to_string();
         first.latitude = Some(31.2);
         first.longitude = Some(121.5);
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![first], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![first], None)?;
         coordinator.process_next()?.context("missing first job")?;
         std::thread::sleep(std::time::Duration::from_millis(2));
 
@@ -3382,7 +3385,7 @@ mod tests {
         second.occurred_at = "2026-06-01T00:00:00Z".to_string();
         second.latitude = Some(25.0);
         second.longitude = Some(80.0);
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![second], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![second], None)?;
         coordinator.process_next()?.context("missing second job")?;
 
         let listed = storage.recent_incidents(50, None)?;
@@ -3405,7 +3408,7 @@ mod tests {
         update.occurred_at = "2026-06-01T00:00:00Z".to_string();
         update.latitude = Some(25.0);
         update.longitude = Some(80.0);
-        storage.ingest_with_cursor(ProviderChannel::FanStudio, vec![update], None)?;
+        storage.ingest_with_cursor(ProviderChannel::Wolfx, vec![update], None)?;
         coordinator.process_next()?;
         let after_update = storage.recent_incidents(50, None)?;
         anyhow::ensure!(after_update.len() == 2);
