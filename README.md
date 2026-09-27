@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 接收 Wolfx 提供的灾害信息；Huania 地震预警默认关闭，需设置 `HUANIA_ENABLED=true` 后重启才接入
+- 接收 Wolfx 提供的灾害信息
 - 支持地震预警和地震速报
 - 每个 Bark 订阅可以配置最多 3 个监测地点
 - 可按信息来源、预计烈度和最低震级设置通知条件
@@ -89,7 +89,7 @@ docker compose ps
 docker compose logs -f disaster-alert
 ```
 
-默认日志级别是 `info`（含 warn/error）。过滤器为环境变量 `RUST_LOG`；未设置时等价于 `disaster_alert=info,tower_http=info`。入站请求由 `TraceLayer` 记录，低频出站 HTTP（高德、Nominatim、Bark）记录为 `outbound.http`。Huania 每秒轮询的 `outbound.http` 记 `debug`，默认不出现在控制台。需要更详细或更安静时：
+默认日志级别是 `info`（含 warn/error）。过滤器为环境变量 `RUST_LOG`；未设置时等价于 `disaster_alert=info,tower_http=info`。入站请求由 `TraceLayer` 记录，低频出站 HTTP（高德、Nominatim、Bark）记录为 `outbound.http`。需要更详细或更安静时：
 
 ```dotenv
 # RUST_LOG=disaster_alert=debug,tower_http=info
@@ -185,7 +185,7 @@ docker compose logs -f disaster-alert
 docker compose logs -f disaster-alert 2>&1 | grep outbound.http
 ```
 
-`RUST_LOG` 控制 `tracing` 过滤器（进程环境优先于 `.env`）。生产未设置时默认 `info`：生命周期、订阅变更、入站 HTTP、低频出站 `outbound.http`、warn/error。心跳、Huania 秒级轮询和确认完成等 `debug` 事件默认不输出。
+`RUST_LOG` 控制 `tracing` 过滤器（进程环境优先于 `.env`）。生产未设置时默认 `info`：生命周期、订阅变更、入站 HTTP、低频出站 `outbound.http`、warn/error。心跳和确认完成等 `debug` 事件默认不输出。
 
 ## 配置
 
@@ -228,7 +228,6 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | --- | --- | --- |
 | `RECONNECT_MIN_SECONDS` | `1` | 数据源断开后的最小重连间隔 |
 | `RECONNECT_MAX_SECONDS` | `30` | 数据源断开后的最大重连间隔 |
-| `HUANIA_ENABLED` | `false` | 是否启动 Huania 地震预警 HTTP 轮询。未设置或 `false` 时不创建该数据源、不发轮询请求，`/api/subscription-options` 与 `/api/status` 也不返回 Huania；改值后需重启进程 |
 | `PUSH_UPDATES` | `false` | 是否推送同一事件的后续报告 |
 | `UPDATE_MIN_REPORT_GAP` | `1` | 后续报告至少间隔多少个报告编号才再次推送 |
 | `IGNORE_TRAINING` | `true` | 是否忽略演练信息 |

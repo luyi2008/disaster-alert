@@ -292,25 +292,6 @@ impl FjallStorage {
         Ok(ids)
     }
 
-    pub(crate) fn provider_cursors(
-        &self,
-        provider: ProviderChannel,
-        streams: &[String],
-    ) -> Result<Vec<(String, String)>> {
-        let mut cursors = Vec::new();
-        for stream in streams {
-            if let Some(value) = self.meta.get(cursor_key(provider, stream))? {
-                cursors.push((
-                    stream.clone(),
-                    std::str::from_utf8(&value)
-                        .context("provider cursor is not UTF-8")?
-                        .to_string(),
-                ));
-            }
-        }
-        Ok(cursors)
-    }
-
     pub(crate) fn pending_inbox(&self, limit: usize) -> Result<Vec<InboxItem>> {
         self.inbox
             .iter()
