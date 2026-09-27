@@ -46,7 +46,6 @@ pub(crate) struct AppState {
     pub(crate) storage_concurrency: Arc<Semaphore>,
     subscription_concurrency: Arc<Semaphore>,
     subscription_confirmations: SubscriptionConfirmationService,
-    huania_enabled: bool,
     pub(crate) bff_service_token: crate::config::SecretString,
 }
 
@@ -81,16 +80,10 @@ impl AppState {
             storage_concurrency: Arc::new(Semaphore::new(32)),
             subscription_concurrency: Arc::new(Semaphore::new(16)),
             subscription_confirmations,
-            huania_enabled: false,
             bff_service_token: crate::config::SecretString::new(
                 "test-bff-service-token".to_string(),
             ),
         }
-    }
-
-    pub(crate) fn with_huania_enabled(mut self, enabled: bool) -> Self {
-        self.huania_enabled = enabled;
-        self
     }
 
     pub(crate) fn with_wave_speeds(mut self, p_wave_km_s: f64, s_wave_km_s: f64) -> Self {
@@ -345,13 +338,11 @@ pub(crate) struct SubscriptionOptionsResponse {
     pub(crate) categories: Vec<CategoryOption>,
 }
 
-pub(crate) async fn subscription_options_handler(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub(crate) async fn subscription_options_handler() -> impl IntoResponse {
     Json(ApiResponse::success(
         "订阅选项获取成功",
         Some(SubscriptionOptionsResponse {
-            categories: category_options(state.huania_enabled),
+            categories: category_options(),
         }),
     ))
 }
@@ -587,7 +578,7 @@ pub(crate) async fn status_handler(State(state): State<AppState>) -> impl IntoRe
                 "运行状态获取成功",
                 Some(StatusResponse {
                     total_subscriptions,
-                    runtime: state.runtime_status.snapshot(durable, state.huania_enabled),
+                    runtime: state.runtime_status.snapshot(durable),
                 }),
             )),
         ),
@@ -679,10 +670,10 @@ mod tests {
     }
 
     #[test]
-    fn status_response_omits_huania_when_disabled() {
+    fn status_response_omits_huania() {
         let response = StatusResponse {
             total_subscriptions: 12,
-            runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default(), false),
+            runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default()),
         };
         let value = serde_json::to_value(response).expect("status response should serialize");
 
@@ -691,19 +682,6 @@ mod tests {
         assert!(value.get("huania").is_none());
         assert!(value.get("durable").is_some());
         assert!(value.get("ready_queues").is_some());
-        assert!(value.get("runtime").is_none());
-    }
-
-    #[test]
-    fn status_response_includes_huania_when_enabled() {
-        let response = StatusResponse {
-            total_subscriptions: 12,
-            runtime: RuntimeStatus::default().snapshot(DurableBacklogSnapshot::default(), true),
-        };
-        let value = serde_json::to_value(response).expect("status response should serialize");
-
-        assert!(value.get("wolfx").is_some());
-        assert!(value.get("huania").is_some());
         assert!(value.get("runtime").is_none());
     }
 

@@ -1,7 +1,7 @@
 use crate::config::{Config, load_dotenv};
 use crate::delivery::{BarkNotifier, BarkPushConfig, NotificationLinkService};
 use crate::lifecycle;
-use crate::providers::{HuaniaSource, WolfxSource};
+use crate::providers::WolfxSource;
 use crate::routes::{
     AppState, ReverseGeocoder, admin_deliveries_handler, admin_device_keys_handler,
     admin_subscriptions_handler, bark_urls_handler, deliveries_handler, events_handler,
@@ -64,7 +64,6 @@ async fn run() -> Result<()> {
         db_path = %config.db_path,
         max_concurrent_notifications = config.max_concurrent_notifications,
         http_pool_size = config.http_pool_size,
-        huania_enabled = config.huania_enabled,
         "config.loaded"
     );
 
@@ -128,7 +127,6 @@ async fn run() -> Result<()> {
         subscription_confirmations.clone(),
         config.max_concurrent_notifications,
     )
-    .with_huania_enabled(config.huania_enabled)
     .with_wave_speeds(config.p_wave_km_s, config.s_wave_km_s)
     .with_bff_service_token(config.bff_service_token.clone());
     if pruned_contexts > 0 {
@@ -204,27 +202,10 @@ async fn run() -> Result<()> {
         .await
         .context("failed to bind HTTP listener")?;
     let wolfx = WolfxSource::new(&config, event_runtime.clone(), runtime_status.clone());
-    let huania = if config.huania_enabled {
-        tracing::info!(event = "huania.enabled", "huania.enabled");
-        Some(HuaniaSource::new(
-            &config,
-            event_runtime.clone(),
-            runtime_status.clone(),
-        )?)
-    } else {
-        tracing::info!(event = "huania.disabled", "huania.disabled");
-        None
-    };
     lifecycle::run_until_shutdown(
         listener,
         app,
-        lifecycle::RuntimeServices::new(
-            storage,
-            event_runtime,
-            subscription_confirmations,
-            wolfx,
-            huania,
-        ),
+        lifecycle::RuntimeServices::new(storage, event_runtime, subscription_confirmations, wolfx),
         Duration::from_secs(config.shutdown_timeout_seconds),
     )
     .await

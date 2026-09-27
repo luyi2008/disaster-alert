@@ -114,16 +114,6 @@ pub(crate) const SOURCES: &[SourceDefinition] = &[
         "Wolfx 中国地震台网测定",
         Some(8 * 3600)
     ),
-    source!(
-        "huania.earlywarning",
-        "earlywarning",
-        Huania,
-        EarthquakeWarning,
-        "huania-earthquake-warning",
-        "Huania 地震预警",
-        "Huania 地震预警",
-        None
-    ),
 ];
 
 pub(crate) fn find(id: &str) -> Option<&'static SourceDefinition> {
@@ -139,16 +129,13 @@ pub(crate) fn find_provider(
         .find(|source| source.channel == channel && source.provider_key == provider_key)
 }
 
-pub(crate) fn category_options(huania_enabled: bool) -> Vec<CategoryOption> {
+pub(crate) fn category_options() -> Vec<CategoryOption> {
     DisasterCategory::ALL
         .into_iter()
         .filter(|category| *category != DisasterCategory::EarthquakeReport)
         .map(|category| {
             let mut source_groups = Vec::<SourceGroup>::new();
             for source in SOURCES.iter().filter(|source| source.category == category) {
-                if !huania_enabled && source.channel == ProviderChannel::Huania {
-                    continue;
-                }
                 if let Some(group) = source_groups
                     .iter_mut()
                     .find(|group| group.id == source.group_id)
@@ -212,7 +199,7 @@ mod tests {
             );
         }
         assert_eq!(
-            category_options(true)
+            category_options()
                 .iter()
                 .flat_map(|category| &category.source_groups)
                 .map(|group| group.sources.len())
@@ -225,27 +212,11 @@ mod tests {
     }
 
     #[test]
-    fn disabled_huania_is_omitted_from_subscription_options() {
-        let options = category_options(false);
-        let ids = source_ids(&options);
-        assert!(!ids.contains(&"huania.earlywarning"));
-        assert!(source_ids(&category_options(true)).contains(&"huania.earlywarning"));
-        assert_eq!(
-            ids.len(),
-            SOURCES
-                .iter()
-                .filter(|source| source.channel != ProviderChannel::Huania
-                    && source.category != DisasterCategory::EarthquakeReport)
-                .count()
-        );
-    }
-
-    #[test]
     fn earthquake_report_is_not_offered_as_a_subscription_option() {
-        let ids = source_ids(&category_options(true));
+        let ids = source_ids(&category_options());
         assert!(!ids.contains(&"wolfx.cenc_eqlist"));
         assert!(
-            !category_options(true)
+            !category_options()
                 .iter()
                 .any(|category| category.id == DisasterCategory::EarthquakeReport.as_str())
         );

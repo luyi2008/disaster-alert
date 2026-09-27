@@ -7,7 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Clone, Default)]
 pub(crate) struct RuntimeStatus {
     wolfx: Arc<ChannelMetrics>,
-    huania: Arc<ChannelMetrics>,
+    /// In-flight records may still name the retired Huania provider.
+    retired_huania: Arc<ChannelMetrics>,
     /// In-flight records may still name the removed FAN Studio provider.
     retired_fan_studio: Arc<ChannelMetrics>,
     inbox_ready: Arc<ReadyQueueMetrics>,
@@ -29,8 +30,6 @@ pub(crate) struct ChannelMetrics {
 #[derive(Serialize)]
 pub(crate) struct RuntimeStatusSnapshot {
     pub(crate) wolfx: ChannelSnapshot,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) huania: Option<ChannelSnapshot>,
     pub(crate) durable: DurableBacklogSnapshot,
     pub(crate) ready_queues: ReadyQueuesSnapshot,
 }
@@ -80,7 +79,7 @@ impl RuntimeStatus {
     pub(crate) fn channel(&self, channel: ProviderChannel) -> &ChannelMetrics {
         match channel {
             ProviderChannel::Wolfx => &self.wolfx,
-            ProviderChannel::Huania => &self.huania,
+            ProviderChannel::Huania => &self.retired_huania,
             ProviderChannel::FanStudio => &self.retired_fan_studio,
         }
     }
@@ -89,18 +88,9 @@ impl RuntimeStatus {
         &self.wolfx
     }
 
-    pub(crate) fn huania(&self) -> &ChannelMetrics {
-        &self.huania
-    }
-
-    pub(crate) fn snapshot(
-        &self,
-        durable: DurableBacklogSnapshot,
-        huania_enabled: bool,
-    ) -> RuntimeStatusSnapshot {
+    pub(crate) fn snapshot(&self, durable: DurableBacklogSnapshot) -> RuntimeStatusSnapshot {
         RuntimeStatusSnapshot {
             wolfx: self.wolfx.snapshot(),
-            huania: huania_enabled.then(|| self.huania.snapshot()),
             durable,
             ready_queues: ReadyQueuesSnapshot {
                 inbox: self.inbox_ready.snapshot(),

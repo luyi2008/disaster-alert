@@ -11,7 +11,6 @@ use crate::models::{
     DisasterCategory, DisasterEvent, IncidentId, InterruptionLevel, ProviderChannel,
     parse_event_epoch,
 };
-use crate::providers::ProviderCursor;
 use crate::runtime::RuntimeStatus;
 use crate::runtime::ready_queue::ReadyQueue;
 use crate::storage::Storage;
@@ -230,17 +229,7 @@ impl EventRuntime {
     }
 
     pub(crate) async fn submit_nonblocking(&self, event: DisasterEvent) -> bool {
-        self.submit_provider_batch_inner(event.channel, vec![event], None)
-            .await
-    }
-
-    pub(crate) async fn submit_provider_snapshot_batch(
-        &self,
-        provider: ProviderChannel,
-        events: Vec<DisasterEvent>,
-        cursor: Option<ProviderCursor>,
-    ) -> bool {
-        self.submit_provider_batch_inner(provider, events, cursor)
+        self.submit_provider_batch_inner(event.channel, vec![event])
             .await
     }
 
@@ -248,7 +237,6 @@ impl EventRuntime {
         &self,
         provider: ProviderChannel,
         events: Vec<DisasterEvent>,
-        cursor: Option<ProviderCursor>,
     ) -> bool {
         if self.inner.closing.load(Ordering::Acquire) {
             return false;
@@ -272,14 +260,9 @@ impl EventRuntime {
             }
         };
         let storage = self.inner.storage.clone();
-        let committed = tokio::task::spawn_blocking(move || {
-            storage.ingest_with_cursor(
-                provider,
-                events,
-                cursor.as_ref().map(|value| (value.stream(), value.value())),
-            )
-        })
-        .await;
+        let committed =
+            tokio::task::spawn_blocking(move || storage.ingest_with_cursor(provider, events, None))
+                .await;
         match committed {
             Ok(Ok(ids)) => {
                 for id in ids {
@@ -296,24 +279,6 @@ impl EventRuntime {
                 false
             }
         }
-    }
-
-    pub(crate) async fn provider_cursors(
-        &self,
-        provider: ProviderChannel,
-        streams: Vec<String>,
-    ) -> Result<Vec<ProviderCursor>> {
-        let storage = self.inner.storage.clone();
-        tokio::task::spawn_blocking(move || {
-            storage.provider_cursors(provider, &streams).map(|values| {
-                values
-                    .into_iter()
-                    .map(|(stream, value)| ProviderCursor::new(stream, value))
-                    .collect()
-            })
-        })
-        .await
-        .context("provider cursor recovery task failed")??
     }
 
     pub(crate) async fn close(&self) {
@@ -1544,7 +1509,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_provider_batch_does_not_commit_events_or_cursor() -> Result<()> {
+    async fn invalid_provider_event_does_not_commit() -> Result<()> {
         let directory = tempfile::tempdir()?;
         let storage = Storage::open(directory.path())?;
         let notifier = BarkNotifier::new(
@@ -1555,26 +1520,13 @@ mod tests {
         )?;
         let links = NotificationLinkService::for_test(&storage);
         let runtime = EventRuntime::for_test(storage.clone(), notifier, links)?;
-        let valid = test_delivery_event(1, "valid");
-        let mut invalid = valid.clone();
+        let mut invalid = test_delivery_event(1, "invalid");
         invalid.event_id.clear();
 
-        let accepted = runtime
-            .submit_provider_snapshot_batch(
-                ProviderChannel::Wolfx,
-                vec![valid, invalid],
-                Some(ProviderCursor::new("cenc", "cursor-1")?),
-            )
-            .await;
+        let accepted = runtime.submit_nonblocking(invalid).await;
 
         anyhow::ensure!(!accepted);
         anyhow::ensure!(storage.inner().pending_inbox(1)?.is_empty());
-        anyhow::ensure!(
-            runtime
-                .provider_cursors(ProviderChannel::Wolfx, vec!["cenc".to_string()])
-                .await?
-                .is_empty()
-        );
         Ok(())
     }
 

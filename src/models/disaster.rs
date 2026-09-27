@@ -261,6 +261,7 @@ use std::fmt;
 #[serde(rename_all = "snake_case")]
 pub enum ProviderChannel {
     Wolfx,
+    /// Huania is no longer ingested. Existing Fjall records still store this tag.
     Huania,
     /// FAN Studio is no longer ingested. Existing Fjall records still store this tag.
     FanStudio,
