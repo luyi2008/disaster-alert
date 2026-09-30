@@ -288,11 +288,12 @@ fn compile_rule(rule: &AlertRule) -> Result<CompiledRule> {
     let (min_magnitude, min_severity, distance_km, intensity_bands) = match rule {
         AlertRule::EarthquakeWarning {
             estimated_intensity_bands,
+            max_distance_km,
             ..
         } => (
             0.0,
             0,
-            20_000.0,
+            *max_distance_km,
             estimated_intensity_bands
                 .iter()
                 .map(|band| CompiledIntensityBand {

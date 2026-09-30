@@ -887,7 +887,7 @@ mod tests {
         anyhow::ensure!(
             initial["title"]
                 .as_str()
-                .is_some_and(|title| title.starts_with("地震播报 ") && title.ends_with("秒后到达"))
+                .is_some_and(|title| title.starts_with("地震预警 ") && title.ends_with("秒后到达"))
         );
         anyhow::ensure!(initial["sound"] == "alarm");
         anyhow::ensure!(initial["volume"] == 10);

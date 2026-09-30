@@ -431,4 +431,22 @@ mod tests {
             "a distant M3 warning estimates intensity 0 at a far target and should not match bands starting at 1"
         );
     }
+
+    #[test]
+    fn earthquake_warning_respects_the_max_distance() {
+        let mut warning = event(DisasterCategory::EarthquakeWarning);
+        warning.latitude = Some(40.99);
+        warning.longitude = Some(83.54);
+        warning.magnitude = Some(8.0);
+
+        let mut value = subscription(DisasterCategory::EarthquakeWarning, None);
+        value.rules[0].distance_km = 1_000.0;
+        assert!(
+            match_compiled(&value, &warning).is_none(),
+            "an epicenter roughly 3000 km away is outside a 1000 km limit"
+        );
+
+        value.rules[0].distance_km = 20_000.0;
+        assert!(match_compiled(&value, &warning).is_some());
+    }
 }

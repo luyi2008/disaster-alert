@@ -60,11 +60,13 @@ fn format_earthquake(
     warning: bool,
 ) -> DisasterAlertContent {
     let base_title = if warning {
-        "地震播报"
+        "地震预警"
     } else {
         "地震速报"
     };
-    let title = stateful_title(base_title, event, timing, now_ms);
+    // Reports are reviewed after the fact, so wave arrival countdowns do not apply.
+    let countdown_timing = timing.filter(|_| warning);
+    let title = stateful_title(base_title, event, countdown_timing, now_ms);
     let target_name = target_name(target);
     let place = earthquake_place(event);
     let mut subtitle = Vec::new();
@@ -89,11 +91,13 @@ fn format_earthquake(
     }
     lines.push(format!("监测地点：{target_name}"));
     if let Some(timing) = timing {
-        lines.push(format!(
-            "震波到达：{} · {}",
-            wave_status("P波", timing.p_arrival_at_ms, now_ms),
-            wave_status("S波", timing.s_arrival_at_ms, now_ms)
-        ));
+        if warning {
+            lines.push(format!(
+                "震波到达：{} · {}",
+                wave_status("P波", timing.p_arrival_at_ms, now_ms),
+                wave_status("S波", timing.s_arrival_at_ms, now_ms)
+            ));
+        }
         lines.push(format!(
             "距离估算：震中距 {:.0} km · 震源距 {:.0} km",
             timing.distance_km, timing.hypocentral_km
@@ -285,7 +289,7 @@ mod tests {
             101_000,
         );
 
-        assert_eq!(content.title, "地震播报 11秒后到达");
+        assert_eq!(content.title, "地震预警 11秒后到达");
         assert!(content.subtitle.contains("四川泸定 · M6.2 · 预计烈度 3.2"));
         assert!(content.body.contains("P波还有 3 秒 · S波还有 11 秒"));
         assert!(content.body.contains("震中距 82 km · 震源距 83 km"));
@@ -293,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn earthquake_report_uses_broadcast_wording_and_arrived_state() {
+    fn earthquake_report_has_no_wave_countdown() {
         let content = format_disaster_alert(
             &event(DisasterCategory::EarthquakeReport),
             &target(),
@@ -301,9 +305,15 @@ mod tests {
             112_000,
         );
 
-        assert_eq!(content.title, "地震速报 震波已到达");
-        assert!(content.body.contains("P波已到达 · S波已到达"));
+        assert_eq!(content.title, "地震速报");
+        assert!(!content.body.contains("震波到达"));
+        assert!(content.body.contains("震中距 82 km · 震源距 83 km"));
         assert_no_internal_fields(&content);
+
+        let mut final_report = event(DisasterCategory::EarthquakeReport);
+        final_report.final_report = true;
+        let content = format_disaster_alert(&final_report, &target(), Some(&timing()), 101_000);
+        assert_eq!(content.title, "地震速报终报");
     }
 
     #[test]
@@ -325,7 +335,7 @@ mod tests {
         cancelled.cancel = true;
         let content = format_disaster_alert(&cancelled, &target(), Some(&timing()), 101_000);
 
-        assert_eq!(content.title, "地震播报已解除");
+        assert_eq!(content.title, "地震预警已解除");
         assert!(content.subtitle.contains("解除/取消"));
     }
 
