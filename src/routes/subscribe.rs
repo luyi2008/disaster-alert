@@ -221,7 +221,7 @@ pub(crate) async fn subscribe_handler(
             device_key,
         },
         targets,
-        payload.alerts,
+        SubscribeRequest::into_alert_rules(payload.alerts),
     );
     if let Err(message) = subscription.validate() {
         return (
@@ -625,16 +625,21 @@ mod tests {
                 },
                 region: crate::models::AdministrativeRegion::default(),
             }],
-            alerts: vec![crate::models::AlertRule::default_for(
-                crate::models::DisasterCategory::EarthquakeReport,
-            )],
+            alerts: vec![crate::models::AlertRuleRequest::EarthquakeReport {
+                _sources: None,
+                min_magnitude: 4.5,
+            }],
         }
     }
 
     #[test]
     fn earthquake_report_subscription_does_not_require_intensity_bands() {
         let payload = request();
-        let subscription = Subscription::new(payload.destination, payload.targets, payload.alerts);
+        let subscription = Subscription::new(
+            payload.destination,
+            payload.targets,
+            SubscribeRequest::into_alert_rules(payload.alerts),
+        );
         assert!(subscription.validate().is_ok());
     }
 

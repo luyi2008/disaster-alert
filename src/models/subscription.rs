@@ -453,7 +453,86 @@ fn current_timestamp_millis() -> i64 {
 pub struct SubscribeRequest {
     pub destination: NotificationDestination,
     pub targets: Vec<MonitoringTarget>,
-    pub alerts: Vec<AlertRule>,
+    pub alerts: Vec<AlertRuleRequest>,
+}
+
+/// Alert rule as submitted by clients. Data sources are chosen by the backend
+/// (always every source of the category), so a legacy `sources` field is
+/// accepted and ignored rather than trusted.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "category", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AlertRuleRequest {
+    EarthquakeWarning {
+        #[serde(default, rename = "sources")]
+        _sources: Option<serde::de::IgnoredAny>,
+        estimated_intensity_bands: Vec<IntensityBand>,
+    },
+    EarthquakeReport {
+        #[serde(default, rename = "sources")]
+        _sources: Option<serde::de::IgnoredAny>,
+        min_magnitude: f64,
+    },
+    WeatherWarning {
+        #[serde(default, rename = "sources")]
+        _sources: Option<serde::de::IgnoredAny>,
+        min_severity: u8,
+        fallback_radius_km: f64,
+    },
+    Tsunami {
+        #[serde(default, rename = "sources")]
+        _sources: Option<serde::de::IgnoredAny>,
+        min_severity: u8,
+    },
+    Typhoon {
+        #[serde(default, rename = "sources")]
+        _sources: Option<serde::de::IgnoredAny>,
+        max_center_distance_km: f64,
+    },
+}
+
+impl From<AlertRuleRequest> for AlertRule {
+    fn from(request: AlertRuleRequest) -> Self {
+        let sources = SourceSelection::All;
+        match request {
+            AlertRuleRequest::EarthquakeWarning {
+                estimated_intensity_bands,
+                ..
+            } => Self::EarthquakeWarning {
+                sources,
+                estimated_intensity_bands,
+            },
+            AlertRuleRequest::EarthquakeReport { min_magnitude, .. } => Self::EarthquakeReport {
+                sources,
+                min_magnitude,
+            },
+            AlertRuleRequest::WeatherWarning {
+                min_severity,
+                fallback_radius_km,
+                ..
+            } => Self::WeatherWarning {
+                sources,
+                min_severity,
+                fallback_radius_km,
+            },
+            AlertRuleRequest::Tsunami { min_severity, .. } => Self::Tsunami {
+                sources,
+                min_severity,
+            },
+            AlertRuleRequest::Typhoon {
+                max_center_distance_km,
+                ..
+            } => Self::Typhoon {
+                sources,
+                max_center_distance_km,
+            },
+        }
+    }
+}
+
+impl SubscribeRequest {
+    pub fn into_alert_rules(alerts: Vec<AlertRuleRequest>) -> Vec<AlertRule> {
+        alerts.into_iter().map(AlertRule::from).collect()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -637,9 +716,19 @@ mod tests {
                 }
             ]
         }))?;
-        let subscription = Subscription::new(request.destination, request.targets, request.alerts);
+        let subscription = Subscription::new(
+            request.destination,
+            request.targets,
+            SubscribeRequest::into_alert_rules(request.alerts),
+        );
 
         anyhow::ensure!(subscription.validate().is_ok());
+        anyhow::ensure!(
+            subscription
+                .alerts
+                .iter()
+                .all(|alert| matches!(alert.sources(), SourceSelection::All))
+        );
         Ok(())
     }
 
