@@ -47,6 +47,8 @@ pub(crate) struct Config {
     pub(crate) ignore_cancel: bool,
     pub(crate) p_wave_km_s: f64,
     pub(crate) s_wave_km_s: f64,
+    /// 地震预警的最大推送距离（震中距），单位 km
+    pub(crate) warning_max_distance_km: f64,
     pub(crate) stale_origin_seconds: i64,
     /// 并发推送的最大数量
     pub(crate) max_concurrent_notifications: usize,
@@ -96,6 +98,7 @@ impl Config {
             ignore_cancel: env_bool("IGNORE_CANCEL", false)?,
             p_wave_km_s: env_parse("P_WAVE_KM_S", 6.0)?,
             s_wave_km_s: env_parse("S_WAVE_KM_S", 3.5)?,
+            warning_max_distance_km: env_parse("WARNING_MAX_DISTANCE_KM", 1_000.0)?,
             stale_origin_seconds: env_parse("STALE_ORIGIN_SECONDS", 600)?,
             max_concurrent_notifications: env_parse(
                 "MAX_CONCURRENT_NOTIFICATIONS",
@@ -135,6 +138,11 @@ impl Config {
         }
         if !(self.s_wave_km_s.is_finite() && self.s_wave_km_s > 0.0) {
             bail!("S_WAVE_KM_S must be a finite positive number");
+        }
+        if !(self.warning_max_distance_km.is_finite()
+            && (1.0..=20_000.0).contains(&self.warning_max_distance_km))
+        {
+            bail!("WARNING_MAX_DISTANCE_KM must be between 1 and 20000");
         }
         if self.stale_origin_seconds < 0 {
             bail!("STALE_ORIGIN_SECONDS must be >= 0");

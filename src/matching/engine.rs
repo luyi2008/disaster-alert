@@ -17,8 +17,12 @@ pub(crate) struct PostingBlock {
     pub(crate) ids: RoaringBitmap,
 }
 
+/// Distance cap for earthquake warnings when the server does not configure one.
+pub(crate) const UNLIMITED_WARNING_DISTANCE_KM: f64 = 20_000.0;
+
 struct EventMatchContext<'a> {
     event: &'a DisasterEvent,
+    warning_max_distance_km: f64,
     source_id: SourceId,
     region_ids: Vec<RegionId>,
     coordinate: Option<EventCoordinate>,
@@ -33,6 +37,7 @@ struct EventCoordinate {
 
 pub(crate) struct MatchEngine {
     pool: rayon::ThreadPool,
+    warning_max_distance_km: f64,
 }
 
 impl MatchEngine {
@@ -42,7 +47,16 @@ impl MatchEngine {
             .thread_name(|index| format!("disaster-match-{index}"))
             .build()
             .context("failed to build matching thread pool")?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            warning_max_distance_km: UNLIMITED_WARNING_DISTANCE_KM,
+        })
+    }
+
+    /// Server-wide cap on the epicentral distance of earthquake warnings.
+    pub(crate) fn with_warning_max_distance_km(mut self, distance_km: f64) -> Self {
+        self.warning_max_distance_km = distance_km;
+        self
     }
 
     pub(crate) fn match_blocks(
@@ -51,7 +65,7 @@ impl MatchEngine {
         blocks: Vec<PostingBlock>,
         subscriptions: &HashMap<SubscriptionId, CompiledSubscription>,
     ) -> Vec<DeliveryRow> {
-        let context = EventMatchContext::new(&event);
+        let context = EventMatchContext::new(&event, self.warning_max_distance_km);
         self.pool.install(|| {
             let rows = blocks
                 .into_par_iter()
@@ -85,7 +99,10 @@ fn match_compiled(
     subscription: &CompiledSubscription,
     event: &DisasterEvent,
 ) -> Option<DeliveryRow> {
-    match_compiled_with_context(subscription, &EventMatchContext::new(event))
+    match_compiled_with_context(
+        subscription,
+        &EventMatchContext::new(event, UNLIMITED_WARNING_DISTANCE_KM),
+    )
 }
 
 fn match_compiled_with_context(
@@ -121,7 +138,9 @@ fn match_compiled_with_context(
             DisasterCategory::Tsunami => continue,
             DisasterCategory::Typhoon => (distance.filter(|value| *value <= rule.distance_km)?, 1),
         };
-        if event.category == DisasterCategory::EarthquakeWarning && distance > rule.distance_km {
+        if event.category == DisasterCategory::EarthquakeWarning
+            && distance > rule.distance_km.min(context.warning_max_distance_km)
+        {
             continue;
         }
         let estimated = if event.category == DisasterCategory::EarthquakeWarning {
@@ -182,7 +201,7 @@ fn haversine_precomputed(event: EventCoordinate, target: &CompiledTarget) -> f64
 }
 
 impl<'a> EventMatchContext<'a> {
-    fn new(event: &'a DisasterEvent) -> Self {
+    fn new(event: &'a DisasterEvent, warning_max_distance_km: f64) -> Self {
         let mut region_ids = event
             .affected_regions
             .iter()
@@ -205,6 +224,7 @@ impl<'a> EventMatchContext<'a> {
             });
         Self {
             event,
+            warning_max_distance_km,
             source_id: source_id(&event.source),
             region_ids,
             coordinate,
@@ -433,20 +453,34 @@ mod tests {
     }
 
     #[test]
-    fn earthquake_warning_respects_the_max_distance() {
+    fn earthquake_warning_respects_the_server_max_distance() -> Result<()> {
         let mut warning = event(DisasterCategory::EarthquakeWarning);
         warning.latitude = Some(40.99);
         warning.longitude = Some(83.54);
         warning.magnitude = Some(8.0);
+        let blocks = || {
+            let mut ids = RoaringBitmap::new();
+            ids.insert(1);
+            vec![PostingBlock { id_block: 0, ids }]
+        };
+        let mut subscription = subscription(DisasterCategory::EarthquakeWarning, None);
+        subscription.rules[0].distance_km = UNLIMITED_WARNING_DISTANCE_KM;
+        let subscriptions = HashMap::from([(SubscriptionId(1), subscription)]);
 
-        let mut value = subscription(DisasterCategory::EarthquakeWarning, None);
-        value.rules[0].distance_km = 1_000.0;
-        assert!(
-            match_compiled(&value, &warning).is_none(),
+        let limited = MatchEngine::new(1)?.with_warning_max_distance_km(1_000.0);
+        anyhow::ensure!(
+            limited
+                .match_blocks(Arc::new(warning.clone()), blocks(), &subscriptions)
+                .is_empty(),
             "an epicenter roughly 3000 km away is outside a 1000 km limit"
         );
-
-        value.rules[0].distance_km = 20_000.0;
-        assert!(match_compiled(&value, &warning).is_some());
+        let unlimited = MatchEngine::new(1)?;
+        anyhow::ensure!(
+            unlimited
+                .match_blocks(Arc::new(warning), blocks(), &subscriptions)
+                .len()
+                == 1
+        );
+        Ok(())
     }
 }

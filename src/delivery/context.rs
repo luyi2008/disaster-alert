@@ -259,11 +259,6 @@ pub(crate) enum NotificationRuleSnapshot {
         sources: NotificationSourcesSnapshot,
         #[serde(rename = "b")]
         intensity_bands: Vec<NotificationIntensityBandSnapshot>,
-        #[serde(
-            rename = "d",
-            default = "crate::models::default_warning_max_distance_km"
-        )]
-        max_distance_km: f64,
     },
     EarthquakeReport {
         #[serde(rename = "s")]
@@ -541,14 +536,12 @@ impl NotificationRuleSnapshot {
             AlertRule::EarthquakeWarning {
                 sources,
                 estimated_intensity_bands,
-                max_distance_km,
             } => Self::EarthquakeWarning {
                 sources: NotificationSourcesSnapshot::from_sources(sources),
                 intensity_bands: estimated_intensity_bands
                     .iter()
                     .map(NotificationIntensityBandSnapshot::from_band)
                     .collect(),
-                max_distance_km: *max_distance_km,
             },
             AlertRule::EarthquakeReport {
                 sources,
@@ -706,12 +699,7 @@ fn validate_rule(category: DisasterCategory, rule: &NotificationRuleSnapshot) ->
         NotificationRuleSnapshot::EarthquakeWarning {
             sources,
             intensity_bands,
-            max_distance_km,
         } => {
-            anyhow::ensure!(
-                max_distance_km.is_finite() && (1.0..=20_000.0).contains(max_distance_km),
-                "invalid distance rule"
-            );
             anyhow::ensure!(
                 !intensity_bands.is_empty()
                     && intensity_bands.len() <= 3
@@ -914,7 +902,6 @@ mod tests {
                     max: 7,
                     interruption_level: InterruptionLevel::Critical,
                 }],
-                max_distance_km: 1_000.0,
             },
         )
     }
@@ -1020,7 +1007,6 @@ mod tests {
                     max: 7,
                     interruption_level: InterruptionLevel::Critical,
                 }],
-                max_distance_km: 1_000.0,
             }),
         };
         let legacy_json = serde_json::to_vec(&snapshot)?;
@@ -1051,7 +1037,6 @@ mod tests {
                         max: 7,
                         interruption_level: InterruptionLevel::Critical,
                     }],
-                    max_distance_km: 1_000.0,
                 },
                 issued_at_ms: 123,
             })
@@ -1089,7 +1074,6 @@ mod tests {
                     max: 7,
                     interruption_level: InterruptionLevel::Critical,
                 }],
-                max_distance_km: 1_000.0,
             },
             issued_at_ms: 123,
         })?;
@@ -1174,7 +1158,6 @@ mod tests {
                     max: 7,
                     interruption_level: InterruptionLevel::Critical,
                 }],
-                max_distance_km: 1_000.0,
             },
         )?;
 
@@ -1219,7 +1202,6 @@ mod tests {
                     max: 7,
                     interruption_level: InterruptionLevel::Critical,
                 }],
-                max_distance_km: 1_000.0,
             },
         )?;
         let snapshot = service.verify(&incident, token(&url))?;
