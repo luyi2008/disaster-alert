@@ -58,8 +58,6 @@ paths:
                         district: 浦东新区
                   alerts:
                     - category: earthquake_warning
-                      sources:
-                        mode: all
                       estimated_intensity_bands:
                         - min: 1
                           max: 1
@@ -504,9 +502,53 @@ components:
           type: array
           minItems: 1
           maxItems: 5
-          description: 每个灾种最多出现一次。
+          description: 每个灾种最多出现一次。数据源由后端决定（始终使用该灾种的全部数据源），请求中不接收 sources。
           items:
-            $ref: "#/components/schemas/AlertRule"
+            $ref: "#/components/schemas/AlertRuleRequest"
+    AlertRuleRequest:
+      oneOf:
+        - $ref: "#/components/schemas/EarthquakeWarningRuleRequest"
+        - $ref: "#/components/schemas/EarthquakeReportRuleRequest"
+      discriminator:
+        propertyName: category
+        mapping:
+          earthquake_warning: "#/components/schemas/EarthquakeWarningRuleRequest"
+          earthquake_report: "#/components/schemas/EarthquakeReportRuleRequest"
+    EarthquakeWarningRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [category, estimated_intensity_bands]
+      properties:
+        category:
+          type: string
+          const: earthquake_warning
+        sources:
+          deprecated: true
+          description: 已废弃，服务端忽略。
+        estimated_intensity_bands:
+          type: array
+          minItems: 1
+          maxItems: 3
+          description: 烈度区间不得重叠，每个中断级别最多出现一次；critical 区间必须覆盖烈度 7。
+          items:
+            $ref: "#/components/schemas/IntensityBand"
+    EarthquakeReportRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [category, min_magnitude]
+      properties:
+        category:
+          type: string
+          const: earthquake_report
+        sources:
+          deprecated: true
+          description: 已废弃，服务端忽略。
+        min_magnitude:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 10
+          description: 最低震级。
     UnsubscribeRequest:
       type: object
       additionalProperties: false
