@@ -181,9 +181,10 @@ fn threshold_matches(rule: &AlertRule, event: &DisasterEvent) -> bool {
 
 fn rule_distance_km(rule: &AlertRule) -> f64 {
     match rule {
-        AlertRule::EarthquakeWarning { .. }
-        | AlertRule::EarthquakeReport { .. }
-        | AlertRule::Tsunami { .. } => 20_000.0,
+        AlertRule::EarthquakeWarning {
+            max_distance_km, ..
+        } => *max_distance_km,
+        AlertRule::EarthquakeReport { .. } | AlertRule::Tsunami { .. } => 20_000.0,
         AlertRule::WeatherWarning {
             fallback_radius_km, ..
         } => *fallback_radius_km,
@@ -308,6 +309,7 @@ mod tests {
                 max: 7,
                 interruption_level: InterruptionLevel::Passive,
             }],
+            max_distance_km: 20_000.0,
         }]);
         assert!(
             match_subscription(
