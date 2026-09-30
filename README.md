@@ -235,6 +235,7 @@ BARK_URL_ALLOWLIST=https://api.day.app,http://192.168.1.10:8080,https://example.
 | `STALE_ORIGIN_SECONDS` | `600` | 忽略起震时间超过该秒数的地震预警。地震速报正式测定常在发震 8–20 分钟后到达，因此速报至少保留 3600 秒 |
 | `P_WAVE_KM_S` | `6.0` | P 波估算速度，单位 km/s |
 | `S_WAVE_KM_S` | `3.5` | S 波估算速度，单位 km/s |
+| `WARNING_MAX_DISTANCE_KM` | `1000` | 地震预警的最大推送距离（震中距，1–20000 km），超出监测点该距离的预警不推送；对所有订阅生效，不可由客户端配置 |
 
 ### 反向地理编码
 

@@ -2701,7 +2701,6 @@ mod tests {
                         interruption_level: InterruptionLevel::Critical,
                     },
                 ],
-                max_distance_km: 1_000.0,
             },
             DisasterCategory::EarthquakeReport => AlertRule::EarthquakeReport {
                 sources,

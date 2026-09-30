@@ -100,9 +100,6 @@ pub enum AlertRule {
     EarthquakeWarning {
         sources: SourceSelection,
         estimated_intensity_bands: Vec<IntensityBand>,
-        /// Epicentral distance beyond which a warning is not delivered.
-        #[serde(default = "default_warning_max_distance_km")]
-        max_distance_km: f64,
     },
     EarthquakeReport {
         sources: SourceSelection,
@@ -121,13 +118,6 @@ pub enum AlertRule {
         sources: SourceSelection,
         max_center_distance_km: f64,
     },
-}
-
-pub const DEFAULT_WARNING_MAX_DISTANCE_KM: f64 = 1_000.0;
-pub const MAX_WARNING_DISTANCE_KM: f64 = 20_000.0;
-
-pub fn default_warning_max_distance_km() -> f64 {
-    DEFAULT_WARNING_MAX_DISTANCE_KM
 }
 
 impl AlertRule {
@@ -173,7 +163,6 @@ impl AlertRule {
                         interruption_level: InterruptionLevel::Critical,
                     },
                 ],
-                max_distance_km: DEFAULT_WARNING_MAX_DISTANCE_KM,
             },
             DisasterCategory::EarthquakeReport => Self::EarthquakeReport {
                 sources,
@@ -360,16 +349,8 @@ fn validate_alert(alert: &AlertRule) -> Result<(), String> {
     match alert {
         AlertRule::EarthquakeWarning {
             estimated_intensity_bands,
-            max_distance_km,
             ..
-        } => {
-            if !(max_distance_km.is_finite()
-                && (1.0..=MAX_WARNING_DISTANCE_KM).contains(max_distance_km))
-            {
-                return Err("地震预警最大距离必须在 1 到 20000 公里之间".to_string());
-            }
-            validate_intensity_bands(estimated_intensity_bands)
-        }
+        } => validate_intensity_bands(estimated_intensity_bands),
         AlertRule::EarthquakeReport { min_magnitude, .. } => {
             if min_magnitude.is_finite() && (0.0..=10.0).contains(min_magnitude) {
                 Ok(())
@@ -542,7 +523,6 @@ mod tests {
                 max: 7,
                 interruption_level: InterruptionLevel::Critical,
             }],
-            max_distance_km: 1_000.0,
         }]);
 
         assert_eq!(subscription.interruption_level_for_intensity(2), None);
@@ -615,35 +595,6 @@ mod tests {
             serde_json::from_slice(&encoded).expect("retired-only subscription should decode");
 
         assert!(decoded.alerts.is_empty());
-    }
-
-    #[test]
-    fn warning_max_distance_defaults_and_is_validated() -> anyhow::Result<()> {
-        let rule = serde_json::from_value::<AlertRule>(serde_json::json!({
-            "category": "earthquake_warning",
-            "sources": { "mode": "all" },
-            "estimated_intensity_bands": [{
-                "min": 1, "max": 7, "interruption_level": "passive"
-            }]
-        }))?;
-        let AlertRule::EarthquakeWarning {
-            max_distance_km, ..
-        } = &rule
-        else {
-            anyhow::bail!("unexpected rule");
-        };
-        anyhow::ensure!(*max_distance_km == DEFAULT_WARNING_MAX_DISTANCE_KM);
-        for invalid in [0.0, -5.0, 20_001.0, f64::NAN] {
-            let mut rule = AlertRule::default_for(DisasterCategory::EarthquakeWarning);
-            if let AlertRule::EarthquakeWarning {
-                max_distance_km, ..
-            } = &mut rule
-            {
-                *max_distance_km = invalid;
-            }
-            anyhow::ensure!(subscription(vec![rule]).validate().is_err());
-        }
-        Ok(())
     }
 
     #[test]

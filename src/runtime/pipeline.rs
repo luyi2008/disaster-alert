@@ -137,7 +137,10 @@ impl EventRuntime {
                         stale_origin_seconds: config.stale_origin_seconds,
                     },
                 ),
-                matcher: Arc::new(MatchEngine::new(match_threads)?),
+                matcher: Arc::new(
+                    MatchEngine::new(match_threads)?
+                        .with_warning_max_distance_km(config.warning_max_distance_km),
+                ),
                 storage,
                 notifier,
                 notification_links,

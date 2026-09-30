@@ -315,7 +315,6 @@ fn public_rule(rule: &NotificationRuleSnapshot) -> AlertRule {
         NotificationRuleSnapshot::EarthquakeWarning {
             sources,
             intensity_bands,
-            max_distance_km,
         } => AlertRule::EarthquakeWarning {
             sources: public_sources(sources),
             estimated_intensity_bands: intensity_bands
@@ -326,7 +325,6 @@ fn public_rule(rule: &NotificationRuleSnapshot) -> AlertRule {
                     interruption_level: band.interruption_level,
                 })
                 .collect(),
-            max_distance_km: *max_distance_km,
         },
         NotificationRuleSnapshot::EarthquakeReport {
             sources,
@@ -508,7 +506,6 @@ mod tests {
                 max: 7,
                 interruption_level: InterruptionLevel::Critical,
             }],
-            max_distance_km: 1_000.0,
         });
         let value = serde_json::to_value(rule).expect("rule should serialize");
         assert_eq!(value["category"], "earthquake_warning");
